@@ -20,6 +20,7 @@ npm run dev      # http://localhost:3000
 | `/journal` | 매매일지 — 입력 폼 + 기록 카드(최신순), 확신도·복기 |
 | `/portfolio` | 포트폴리오 — 보유 종목 평가손익 표 + 관심 종목 그리드. 행/카드 클릭 시 일·주·월봉 차트 |
 | `/screener` | 스크리너 — 지표 min~max 필터 + 결과 테이블, 관심 종목 추가 |
+| `/news` | 뉴스 — 키워드별 네이버 뉴스 분류(칩 필터 + 세로 피드), [업데이트] 버튼 동기화 |
 
 ## 구현 범위 (PRD 로드맵 기준)
 
@@ -44,3 +45,10 @@ npm run dev      # http://localhost:3000
 - `lib/quotes.ts` — 시세 어댑터. `/api/quotes` 호출, 실패 시 mock 폴백
 - `lib/server/{kis,finnhub}.ts` — 시세 프로바이더(서버 전용, `npm test`로 검증)
 - `lib/format.ts` — 통화·퍼센트·날짜·손익 색상
+
+## 뉴스 대시보드(/news)
+
+- 네이버 검색 API 키(`NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`)와 전용 PostgreSQL(`DATABASE_URL`)이 필요하다(서버 전용). 미설정 시 `/news`는 "설정이 필요합니다" 안내를 보여준다.
+- 스키마: `db/news-schema.sql`을 DB에 1회 적용.
+- 키워드=검색어=분류함. `[업데이트]` 버튼 또는 매일 cron이 `POST /api/news/sync`를 호출해 동기화한다(`(keyword_id, link)` 유니크로 중복 제거).
+- 매일 자동: Coolify Scheduled Task에서 `curl -X POST <도메인>/api/news/sync`.
