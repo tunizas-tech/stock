@@ -80,3 +80,15 @@ export function todayISO(): string {
   const d = String(now.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
+
+/** ISO 시각 → "방금 전 / N분 전 / N시간 전 / N일 전". 파싱 불가면 "". */
+export function fmtRelative(iso: string, now: Date = new Date()): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const diffMin = Math.max(0, Math.floor((now.getTime() - t) / 60000));
+  if (diffMin < 1) return "방금 전";
+  if (diffMin < 60) return `${diffMin}분 전`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}시간 전`;
+  return `${Math.floor(diffHr / 24)}일 전`;
+}
