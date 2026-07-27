@@ -10,6 +10,7 @@ const ROUTES = [
   { href: "/portfolio", label: "포트폴리오" },
   { href: "/screener", label: "스크리너" },
   { href: "/journal", label: "매매일지" },
+  { href: "/news", label: "뉴스" },
   { href: "/valuechain", label: "밸류체인" },
 ];
 

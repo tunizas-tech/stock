@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtMarketCap } from "./format";
+import { fmtMarketCap, fmtRelative } from "./format";
 
 // 시가총액 표기: 시장 관용 단위(KR 억 원 → 1조 이상은 조, US 백만 달러 → $1B 이상은 B).
 
@@ -22,5 +22,25 @@ describe("fmtMarketCap", () => {
 
   it("결측이면 — 를 돌려준다", () => {
     expect(fmtMarketCap(undefined, "KR")).toBe("—");
+  });
+});
+
+describe("fmtRelative", () => {
+  const now = new Date("2026-07-27T12:00:00.000Z");
+
+  it("1분 미만은 '방금 전'", () => {
+    expect(fmtRelative("2026-07-27T11:59:30.000Z", now)).toBe("방금 전");
+  });
+  it("분 단위", () => {
+    expect(fmtRelative("2026-07-27T11:30:00.000Z", now)).toBe("30분 전");
+  });
+  it("시간 단위", () => {
+    expect(fmtRelative("2026-07-27T09:00:00.000Z", now)).toBe("3시간 전");
+  });
+  it("일 단위", () => {
+    expect(fmtRelative("2026-07-25T12:00:00.000Z", now)).toBe("2일 전");
+  });
+  it("파싱 불가면 빈 문자열", () => {
+    expect(fmtRelative("nope", now)).toBe("");
   });
 });
