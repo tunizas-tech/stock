@@ -17,7 +17,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "keyword가 필요합니다" }, { status: 400 });
   }
 
-  const kw = await addKeyword(pool, keyword);
+  let kw;
+  try {
+    kw = await addKeyword(pool, keyword);
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "키워드 추가 실패" },
+      { status: 500 }
+    );
+  }
 
   // 추가 즉시 한 번 조회해 채운다(키가 있을 때만). 실패해도 키워드 추가는 유지.
   const creds = naverCreds();

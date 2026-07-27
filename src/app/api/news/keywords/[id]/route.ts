@@ -16,6 +16,13 @@ export async function DELETE(
   if (!Number.isFinite(id)) {
     return NextResponse.json({ error: "잘못된 id" }, { status: 400 });
   }
-  await deleteKeyword(pool, id);
-  return NextResponse.json({ ok: true });
+  try {
+    await deleteKeyword(pool, id);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "삭제 실패" },
+      { status: 500 }
+    );
+  }
 }

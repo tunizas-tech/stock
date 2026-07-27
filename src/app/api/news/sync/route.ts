@@ -14,7 +14,14 @@ export async function POST(_req: Request): Promise<NextResponse> {
       { status: 503 }
     );
   }
-  const results = await syncAll(pool, creds);
-  const inserted = results.reduce((s, r) => s + r.inserted, 0);
-  return NextResponse.json({ results, inserted });
+  try {
+    const results = await syncAll(pool, creds);
+    const inserted = results.reduce((s, r) => s + r.inserted, 0);
+    return NextResponse.json({ results, inserted });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "동기화 실패" },
+      { status: 500 }
+    );
+  }
 }

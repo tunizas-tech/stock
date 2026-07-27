@@ -9,6 +9,13 @@ export async function GET(): Promise<NextResponse> {
   if (!pool) {
     return NextResponse.json({ error: "DATABASE_URL 미설정" }, { status: 503 });
   }
-  const feed = await listFeed(pool);
-  return NextResponse.json({ feed });
+  try {
+    const feed = await listFeed(pool);
+    return NextResponse.json({ feed });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "조회 실패" },
+      { status: 500 }
+    );
+  }
 }

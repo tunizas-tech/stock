@@ -18,15 +18,23 @@ export default function NewsPage() {
   const [toast, setToast] = useState("");
 
   async function load() {
-    const res = await fetch("/api/news");
-    if (res.status === 503) {
-      setConfigMissing(true);
+    try {
+      const res = await fetch("/api/news");
+      if (res.status === 503) {
+        setConfigMissing(true);
+        return;
+      }
+      if (!res.ok) {
+        setToast("뉴스를 불러오지 못했습니다");
+        return;
+      }
+      const body = await res.json();
+      setFeed(body.feed ?? []);
+    } catch {
+      setToast("뉴스를 불러오지 못했습니다");
+    } finally {
       setLoading(false);
-      return;
     }
-    const body = await res.json();
-    setFeed(body.feed ?? []);
-    setLoading(false);
   }
 
   useEffect(() => {
