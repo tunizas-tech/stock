@@ -122,3 +122,42 @@ export interface ValueChain {
   disclaimer?: string;
   sources?: { label: string; url: string }[];
 }
+
+// ---------------------------------------------------------------------------
+// 뉴스 키워드 대시보드(/news) — 전용 PostgreSQL. 기존 db 파사드/Supabase와 무관.
+// ---------------------------------------------------------------------------
+
+export interface NewsKeyword {
+  id: number;
+  keyword: string;
+  sortOrder: number;
+  active: boolean;
+  createdAt: string; // ISO
+}
+
+export interface NewsItem {
+  id: number;
+  keywordId: number;
+  title: string;
+  link: string; // 네이버 link (키워드 내 중복제거 키)
+  originalLink: string | null; // 언론사 원문
+  description: string | null;
+  source: string | null; // 언론사/호스트 (best-effort)
+  pubDate: string | null; // ISO
+  fetchedAt: string; // ISO
+}
+
+/** 네이버 API 응답을 정규화한, DB 저장 직전 형태(id/fetchedAt 없음). */
+export interface RawNewsItem {
+  title: string;
+  link: string;
+  originalLink: string | null;
+  description: string | null;
+  source: string | null;
+  pubDate: string | null; // ISO
+}
+
+export interface NewsFeedGroup {
+  keyword: NewsKeyword;
+  items: NewsItem[];
+}
