@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npm install *)",
+      "PowerShell(npm test *)",
+      "PowerShell(npx vitest run src/lib/server/kis.test.ts 2>$null; exit 0)",
+      "PowerShell(npx vitest run src/app/api/quotes/route.test.ts 2>$null; exit 0)",
+      "PowerShell(npx vitest run src/lib/quotes.test.ts 2>$null; exit 0)",
+      "PowerShell(npm run *)",
+      "PowerShell($p = Invoke-WebRequest -Uri \"http://localhost:3000/portfolio\" -UseBasicParsing; $p.StatusCode; $bad = try { Invoke-WebRequest -Uri \"http://localhost:3000/api/quotes\" -Method Post -ContentType \"application/json\" -Body '{}' -UseBasicParsing } catch { $_.Exception.Response.StatusCode.value__ }; $bad)",
+      "PowerShell(Stop-Process *)",
+      "PowerShell(npx vitest run src/lib/screener.test.ts 2>$null; exit 0)",
+      "PowerShell(npx vitest run src/lib/server/finnhub-fundamentals.test.ts 2>$null; exit 0)",
+      "PowerShell(npx vitest run src/lib/server 2>$null; exit 0)",
+      "PowerShell(npx vitest run src/lib/server/kis-fundamentals.test.ts 2>$null; exit 0)",
+      "PowerShell(npx vitest run src/app/api/fundamentals/route.test.ts 2>$null; exit 0)",
+      "PowerShell(npx vitest run src/lib/format.test.ts 2>$null; exit 0)",
+      "PowerShell(ConvertTo-Json *)",
+      "PowerShell($json = '{\"items\":[{\"ticker\":\"005930\",\"market\":\"KR\",\"name\":\"삼성전자\"}]}'; $bytes = [System.Text.Encoding]::UTF8.GetBytes\\($json\\); $req = [System.Net.WebRequest]::Create\\(\"http://localhost:3000/api/fundamentals\"\\); $req.Method = \"POST\"; $req.ContentType = \"application/json; charset=utf-8\"; $req.ContentLength = $bytes.Length; $s = $req.GetRequestStream\\(\\); $s.Write\\($bytes, 0, $bytes.Length\\); $s.Close\\(\\); $resp = $req.GetResponse\\(\\); $reader = New-Object System.IO.StreamReader\\($resp.GetResponseStream\\(\\), [System.Text.Encoding]::UTF8\\); $body = $reader.ReadToEnd\\(\\); $resp.Close\\(\\); \\($body | ConvertFrom-Json\\).fundamentals.\"KR:005930\".name)",
+      "PowerShell($deadline = \\(Get-Date\\).AddSeconds\\(15\\); $ok = $false; while \\(\\(Get-Date\\) -lt $deadline\\) { try { $p = Invoke-WebRequest -Uri \"http://localhost:3000\" -UseBasicParsing; if \\($p.StatusCode -eq 200\\) { $ok = $true; break } } catch { Start-Sleep -Milliseconds 500 } }; if \\($ok\\) { \"server up: 200\" } else { \"server not responding\" })",
+      "PowerShell(npx vitest run src/lib/mock-candles.test.ts 2>$null; exit 0)",
+      "PowerShell(npx vitest run src/lib/server/kis-candles.test.ts 2>$null; exit 0)",
+      "PowerShell(npx vitest run src/app/api/candles/route.test.ts 2>$null; exit 0)",
+      "PowerShell(npx vitest run src/lib/candles.test.ts 2>$null; exit 0)",
+      "PowerShell(Rename-Item *)",
+      "PowerShell($deadline = \\(Get-Date\\).AddSeconds\\(20\\); while \\(\\(Get-Date\\) -lt $deadline\\) { try { $r = Invoke-RestMethod -Uri \"http://localhost:3000/api/quotes\" -Method Post -ContentType \"application/json\" -Body '{\"items\":[{\"ticker\":\"005930\",\"market\":\"KR\"}]}'; break } catch { Start-Sleep -Milliseconds 500 } }; \"삼성전자 현재가: $\\($r.quotes.'KR:005930'.price\\) \\(변동 $\\($r.quotes.'KR:005930'.change\\), $\\($r.quotes.'KR:005930'.changePct\\)%\\)\")",
+      "PowerShell($r = Invoke-RestMethod -Uri \"http://localhost:3000/api/candles?kind=index&market=KR&code=0001&period=D\"; \"코스피 일봉 $\\($r.candles.Count\\)개, 마지막 종가: $\\($r.candles[-1].close\\) \\(mock이면 2700\\)\"; $r2 = Invoke-RestMethod -Uri \"http://localhost:3000/api/candles?kind=stock&market=US&code=AAPL&period=D\"; \"AAPL 일봉 $\\($r2.candles.Count\\)개, 마지막 종가: $\\($r2.candles[-1].close\\) \\(mock이면 295.3\\)\"; $r3 = Invoke-RestMethod -Uri \"http://localhost:3000/api/candles?kind=index&market=US&code=SPX&period=D\"; \"S&P500 일봉 $\\($r3.candles.Count\\)개, 마지막 종가: $\\($r3.candles[-1].close\\) \\(mock이면 5600\\)\")",
+      "PowerShell($json = '{\"items\":[{\"ticker\":\"005930\",\"market\":\"KR\",\"name\":\"Samsung\"},{\"ticker\":\"AAPL\",\"market\":\"US\",\"name\":\"Apple\"}]}'; $r = Invoke-RestMethod -Uri \"http://localhost:3000/api/fundamentals\" -Method Post -ContentType \"application/json\" -Body $json; \"삼성전자 PER $\\($r.fundamentals.'KR:005930'.per\\) / PBR $\\($r.fundamentals.'KR:005930'.pbr\\) / 시총 $\\($r.fundamentals.'KR:005930'.marketCap\\)억 \\(mock이면 PER 9.65\\)\"; \"AAPL PER $\\($r.fundamentals.'US:AAPL'.per\\) \\(Finnhub 키 없음 → mock 30.86이어야 정상\\)\")"
+    ]
+  }
+}
