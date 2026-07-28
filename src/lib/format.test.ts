@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { fmtMarketCap, fmtRelative } from "./format";
+import { fmtMarketCap, fmtRatio, fmtRelative } from "./format";
+
+// PER·PBR 표기: KIS는 데이터가 없을 때 0을 주므로 0과 undefined는 모두 "—".
+// 음수는 적자를 뜻하는 유의미한 값이라 그대로 보여준다.
+
+describe("fmtRatio", () => {
+  it("소수 1자리로 자른다", () => {
+    expect(fmtRatio(80.39)).toBe("80.4");
+  });
+
+  it("데이터 없음(0)은 —", () => {
+    expect(fmtRatio(0)).toBe("—");
+  });
+
+  it("undefined는 —", () => {
+    expect(fmtRatio(undefined)).toBe("—");
+  });
+
+  it("음수(적자)는 그대로 보여준다", () => {
+    expect(fmtRatio(-15.24)).toBe("-15.2");
+  });
+});
 
 // 시가총액 표기: 시장 관용 단위(KR 억 원 → 1조 이상은 조, US 백만 달러 → $1B 이상은 B).
 

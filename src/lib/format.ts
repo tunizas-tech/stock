@@ -65,6 +65,12 @@ export function fmtMarketCap(
     : `$${Math.round(value).toLocaleString("en-US")}M`;
 }
 
+/** PER·PBR 표기. KIS는 데이터가 없으면 0을 주므로 0·undefined는 "—", 음수(적자)는 그대로. */
+export function fmtRatio(value: number | undefined): string {
+  if (value === undefined || value === 0) return "—";
+  return value.toFixed(1);
+}
+
 /** YYYY-MM-DD → "2026년 5월 31일" */
 export function fmtDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);

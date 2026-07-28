@@ -37,6 +37,26 @@ describe("valuechains", () => {
       expect(c.sources.length).toBeGreaterThanOrEqual(2);
     }
   });
+  // 티커가 붙은 노드는 지표를 조회하므로 국내 6자리 코드 형식이어야 한다.
+  // 비상장·해외·개념 노드는 티커를 비워 둔다.
+  it("티커는 6자리 숫자다", () => {
+    for (const c of VALUE_CHAINS) {
+      for (const s of c.stages) {
+        for (const n of s.nodes) {
+          if (n.ticker !== undefined) expect(n.ticker).toMatch(/^\d{6}$/);
+        }
+      }
+    }
+  });
+  it("티커가 있는 노드는 종목 하나만 담는다", () => {
+    for (const c of VALUE_CHAINS) {
+      for (const s of c.stages) {
+        for (const n of s.nodes) {
+          if (n.ticker !== undefined) expect(n.name).not.toContain("·");
+        }
+      }
+    }
+  });
 });
 
 describe("splitByStatus", () => {
