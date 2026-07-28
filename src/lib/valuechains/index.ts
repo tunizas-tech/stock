@@ -9,3 +9,14 @@ export const VALUE_CHAINS: ValueChain[] = [skEternixRenewable];
 export function getValueChain(slug: string): ValueChain | undefined {
   return VALUE_CHAINS.find((c) => c.slug === slug);
 }
+
+/** 목록 화면용 — 공개본과 초안을 나눈다. */
+export function splitByStatus(chains: ValueChain[]): {
+  published: ValueChain[];
+  drafts: ValueChain[];
+} {
+  return {
+    published: chains.filter((c) => c.status === "published"),
+    drafts: chains.filter((c) => c.status === "draft"),
+  };
+}
