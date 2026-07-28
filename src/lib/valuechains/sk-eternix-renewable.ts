@@ -1,15 +1,13 @@
-// 산업/테마별 밸류체인 데이터 — 정적 파일(직접 편집). 타입은 types.ts.
-// 새 산업을 추가하려면 VALUE_CHAINS 배열에 ValueChain 객체를 하나 더 넣으면 된다.
-// 첫 시드: SK이터닉스 중심 신재생에너지 밸류체인(원본 마인드맵 이식).
+// SK이터닉스 중심 신재생에너지 밸류체인 (첫 시드, 원본 마인드맵 이식).
 
-import type { ValueChain } from "./types";
+import type { ValueChain } from "../types";
 
-export const VALUE_CHAINS: ValueChain[] = [
-  {
-    slug: "sk-eternix-renewable",
+export const skEternixRenewable: ValueChain = {
+  slug: "sk-eternix-renewable",
     title: "SK이터닉스 중심 신재생에너지 밸류체인",
     summary:
       "상류(소재·장비) → 중류(셀·모듈) → 하류(개발·발전·판매) → 수요(데이터센터·RE100)로 한 방향으로 이어지는 흐름입니다. SK이터닉스는 전기를 만들어 파는 하류 종합 사업자입니다.",
+    status: "published",
     anchor: "SK이터닉스",
     updatedAt: "2026-07-26",
     flows: {
@@ -117,9 +115,4 @@ export const VALUE_CHAINS: ValueChain[] = [
         url: "https://www.newsis.com/view/NISX20260724_0003721410",
       },
     ],
-  },
-];
-
-export function getValueChain(slug: string): ValueChain | undefined {
-  return VALUE_CHAINS.find((c) => c.slug === slug);
-}
+};
