@@ -56,6 +56,7 @@ export interface Fundamentals {
   dividendYield?: number; // %
   revenueGrowth?: number; // % (YoY)
   off52wHigh?: number; // 52주 고가 대비 % (보통 음수)
+  isMock?: boolean; // 실데이터 조회 실패로 샘플값을 쓴 경우 true (화면에 표시해 오인을 막는다)
 }
 
 /** 차트 주기 — 일봉/주봉/월봉. */

@@ -62,6 +62,24 @@ describe("POST /api/fundamentals", () => {
     expect(body.fundamentals["US:AAPL"].per).toBe(29.8);
     expect(body.fundamentals["US:AAPL"].off52wHigh).toBe(-10);
     expect(body.fundamentals["US:AAPL"].name).toBe("Apple");
+    // 실데이터에는 mock 표시가 붙지 않는다
+    expect(body.fundamentals["US:AAPL"].isMock).toBeUndefined();
+  });
+
+  // 폴백이 조용히 일어나면 화면의 PER·PBR을 실데이터로 오인하게 된다.
+  it("mock 폴백에는 isMock 표시가 붙는다", async () => {
+    vi.stubEnv("FINNHUB_API_KEY", "fh-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 429, json: async () => ({}) })
+    );
+
+    const res = await POST(
+      req({ items: [{ ticker: "AAPL", market: "US", name: "Apple" }] })
+    );
+    const body = await res.json();
+
+    expect(body.fundamentals["US:AAPL"].isMock).toBe(true);
   });
 
   it("실데이터 조회가 실패한 종목은 mock으로 폴백한다", async () => {

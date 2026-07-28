@@ -58,7 +58,15 @@ function NodeMetrics({ node, data }: { node: ChainNode; data: Fundamentals | und
     <div className="tabular shrink-0 text-right text-[10px] leading-tight text-muted">
       {data ? (
         <>
-          <div className="font-semibold text-ink">
+          {data.isMock && (
+            <div
+              className="mb-0.5 rounded border border-loss px-1 py-px text-[9px] font-bold text-loss"
+              title="실시세 조회에 실패해 샘플 숫자를 보여주고 있습니다"
+            >
+              샘플
+            </div>
+          )}
+          <div className={data.isMock ? "font-semibold" : "font-semibold text-ink"}>
             {fmtMarketCap(data.marketCap, "KR")}
           </div>
           <div>PER {fmtRatio(data.per)}</div>

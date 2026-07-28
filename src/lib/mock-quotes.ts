@@ -51,5 +51,6 @@ export function mockFundamentals(
     dividendYield: round2(u("div") * 5), // 0~5%
     revenueGrowth: round2(-10 + u("grw") * 50), // -10~+40%
     off52wHigh: round2(-u("52w") * 45), // 0~-45%
+    isMock: true,
   };
 }
