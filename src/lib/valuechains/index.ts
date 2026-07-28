@@ -3,8 +3,12 @@
 
 import type { ValueChain } from "../types";
 import { skEternixRenewable } from "./sk-eternix-renewable";
+import { hbmAdvancedPackaging } from "./hbm-advanced-packaging";
 
-export const VALUE_CHAINS: ValueChain[] = [skEternixRenewable];
+export const VALUE_CHAINS: ValueChain[] = [
+  skEternixRenewable,
+  hbmAdvancedPackaging,
+];
 
 export function getValueChain(slug: string): ValueChain | undefined {
   return VALUE_CHAINS.find((c) => c.slug === slug);
