@@ -114,13 +114,14 @@ export interface ValueChain {
   slug: string;
   title: string;
   summary: string;
+  status: "draft" | "published"; // 초안은 목록에서 "초안" 그룹으로 분리 표시
   anchor?: string; // 대표 종목명
   updatedAt: string; // YYYY-MM-DD
   flows?: { forward: string; reverse: string };
   stages: ChainStage[];
   thesis?: string;
   disclaimer?: string;
-  sources?: { label: string; url: string }[];
+  sources: { label: string; url: string }[]; // 정확도 규약상 2개 이상
 }
 
 // ---------------------------------------------------------------------------

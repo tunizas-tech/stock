@@ -7,6 +7,7 @@ export const skEternixRenewable: ValueChain = {
     title: "SK이터닉스 중심 신재생에너지 밸류체인",
     summary:
       "상류(소재·장비) → 중류(셀·모듈) → 하류(개발·발전·판매) → 수요(데이터센터·RE100)로 한 방향으로 이어지는 흐름입니다. SK이터닉스는 전기를 만들어 파는 하류 종합 사업자입니다.",
+    status: "published",
     anchor: "SK이터닉스",
     updatedAt: "2026-07-26",
     flows: {

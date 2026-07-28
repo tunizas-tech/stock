@@ -21,4 +21,19 @@ describe("valuechains", () => {
       }
     }
   });
+  it("모든 밸류체인은 단계를 가진다", () => {
+    for (const c of VALUE_CHAINS) {
+      expect(c.stages.length).toBeGreaterThan(0);
+    }
+  });
+  it("모든 밸류체인은 유효한 status를 가진다", () => {
+    for (const c of VALUE_CHAINS) {
+      expect(["draft", "published"]).toContain(c.status);
+    }
+  });
+  it("모든 밸류체인은 출처를 2개 이상 가진다", () => {
+    for (const c of VALUE_CHAINS) {
+      expect(c.sources.length).toBeGreaterThanOrEqual(2);
+    }
+  });
 });
