@@ -46,6 +46,13 @@ npm run dev      # http://localhost:3000
 - `lib/server/{kis,finnhub}.ts` — 시세 프로바이더(서버 전용, `npm test`로 검증)
 - `lib/format.ts` — 통화·퍼센트·날짜·손익 색상
 
+## 밸류체인(/valuechain)
+
+- 데이터는 정적 파일이다. 산업당 파일 하나: `src/lib/valuechains/<slug>.ts` → `index.ts` 배럴이 모은다.
+- 각 체인은 `status: "draft" | "published"`를 가진다. 초안은 목록에서 "초안" 그룹으로 분리되고 상세 상단에 배너가 붙는다.
+- 작업 순서는 `docs/valuechain-backlog.md`. 맨 위 미완료 항목을 초안으로 만들고, 브라우저 확인 후 `published`로 바꾸며 체크한다.
+- 정확도 규약: 출처 2개 이상 필수, 각 종목의 역할은 출처에서 확인된 사업 내용만 기재, 확신이 낮은 종목은 넣지 않는다.
+
 ## 뉴스 대시보드(/news)
 
 - 네이버 검색 API 키(`NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`)와 전용 PostgreSQL(`DATABASE_URL`)이 필요하다(서버 전용). 미설정 시 `/news`는 "설정이 필요합니다" 안내를 보여준다.
