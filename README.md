@@ -49,6 +49,6 @@ npm run dev      # http://localhost:3000
 ## 뉴스 대시보드(/news)
 
 - 네이버 검색 API 키(`NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`)와 전용 PostgreSQL(`DATABASE_URL`)이 필요하다(서버 전용). 미설정 시 `/news`는 "설정이 필요합니다" 안내를 보여준다.
-- 스키마: `db/news-schema.sql`을 DB에 1회 적용.
+- 스키마: `db/news-schema.sql`을 DB에 1회 적용. `.env.local`에 키·URL을 넣고 `npm run news:setup`을 실행하면 네이버 API 실호출 검증 + 스키마 적용을 한 번에 한다(psql 불필요, 여러 번 실행해도 안전).
 - 키워드=검색어=분류함. `[업데이트]` 버튼 또는 매일 cron이 `POST /api/news/sync`를 호출해 동기화한다(`(keyword_id, link)` 유니크로 중복 제거).
 - 매일 자동: Coolify Scheduled Task에서 `curl -X POST <도메인>/api/news/sync`.

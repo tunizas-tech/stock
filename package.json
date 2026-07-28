@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "news:setup": "node --env-file-if-exists=.env.local scripts/news-setup.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.46.1",
