@@ -6,8 +6,12 @@ import { NextResponse } from "next/server";
 import { getFinnhubFundamentals } from "@/lib/server/finnhub";
 import { getKisFundamentals } from "@/lib/server/kis";
 import { mockFundamentals } from "@/lib/mock-quotes";
+import { mapLimit } from "@/lib/server/map-limit";
 import { quoteKey } from "@/lib/quotes";
 import type { Fundamentals, Market } from "@/lib/types";
+
+const CONCURRENCY = 4;
+const RETRY_DELAY_MS = 400;
 
 interface FundamentalsRequestItem {
   ticker: string;
@@ -48,14 +52,21 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
+  // KIS 초당 요청 제한 때문에 한꺼번에 던지면 일부가 실패해 mock으로 떨어진다.
+  // 동시 실행을 묶고, 실패하면 한 번 더 시도한 뒤에야 mock으로 폴백한다.
   const fundamentals: Record<string, Fundamentals> = {};
-  await Promise.all(
-    items.map(async (item) => {
-      const f = await fetchLive(item).catch(() =>
+  const results = await mapLimit(items, CONCURRENCY, async (item) => {
+    try {
+      return await fetchLive(item);
+    } catch {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      return fetchLive(item).catch(() =>
         mockFundamentals(item.ticker, item.market, item.name)
       );
-      fundamentals[quoteKey(item.market, item.ticker)] = f;
-    })
-  );
+    }
+  });
+  items.forEach((item, i) => {
+    fundamentals[quoteKey(item.market, item.ticker)] = results[i];
+  });
   return NextResponse.json({ fundamentals });
 }

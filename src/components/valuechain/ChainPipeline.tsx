@@ -51,29 +51,50 @@ export function ChainPipeline({ stages }: { stages: ChainStage[] }) {
   );
 }
 
-/** 종목명 오른편 지표 열 — 시총 / PER / PBR. 로딩 중에는 자리만 잡아 둔다. */
+/** 지표 태그 한 칸. */
+function Tag({
+  children,
+  tone = "normal",
+  title,
+}: {
+  children: React.ReactNode;
+  tone?: "normal" | "strong" | "warn";
+  title?: string;
+}) {
+  const cls =
+    tone === "strong"
+      ? "border-line bg-surface text-ink"
+      : tone === "warn"
+        ? "border-loss bg-surface font-bold text-loss"
+        : "border-line bg-surface text-muted";
+  return (
+    <span
+      className={`tabular rounded border px-1.5 py-px text-[10px] leading-[1.4] ${cls}`}
+      title={title}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** 종목명 아래 가로 지표 태그 — 시총 · PER · PBR. 로딩 중에는 자리만 잡아 둔다. */
 function NodeMetrics({ node, data }: { node: ChainNode; data: Fundamentals | undefined }) {
   if (node.ticker === undefined) return null;
   return (
-    <div className="tabular shrink-0 text-right text-[10px] leading-tight text-muted">
+    <div className="mt-1.5 flex flex-wrap items-center gap-1">
       {data ? (
         <>
           {data.isMock && (
-            <div
-              className="mb-0.5 rounded border border-loss px-1 py-px text-[9px] font-bold text-loss"
-              title="실시세 조회에 실패해 샘플 숫자를 보여주고 있습니다"
-            >
+            <Tag tone="warn" title="실시세 조회에 실패해 샘플 숫자를 보여주고 있습니다">
               샘플
-            </div>
+            </Tag>
           )}
-          <div className={data.isMock ? "font-semibold" : "font-semibold text-ink"}>
-            {fmtMarketCap(data.marketCap, "KR")}
-          </div>
-          <div>PER {fmtRatio(data.per)}</div>
-          <div>PBR {fmtRatio(data.pbr)}</div>
+          <Tag tone="strong">{fmtMarketCap(data.marketCap, "KR")}</Tag>
+          <Tag>PER {fmtRatio(data.per)}</Tag>
+          <Tag>PBR {fmtRatio(data.pbr)}</Tag>
         </>
       ) : (
-        <div className="text-muted">···</div>
+        <Tag>···</Tag>
       )}
     </div>
   );
@@ -155,35 +176,33 @@ function StageColumn({
                 : { borderLeftWidth: 3, borderLeftColor: color }
             }
           >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span
-                    className={`text-sm font-medium ${
-                      node.anchor ? "text-accent" : "text-ink"
-                    }`}
-                  >
-                    {node.name}
-                  </span>
-                  {node.tag && (
-                    <span className="tabular rounded bg-accent px-1.5 py-0.5 text-[9px] font-bold text-white">
-                      {node.tag}
-                    </span>
-                  )}
-                </div>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted">
-                  {node.role}
-                </p>
-              </div>
-              <NodeMetrics
-                node={node}
-                data={
-                  node.ticker && fundamentals
-                    ? fundamentals[quoteKey("KR", node.ticker)]
-                    : undefined
-                }
-              />
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`text-sm font-medium ${
+                  node.anchor ? "text-accent" : "text-ink"
+                }`}
+              >
+                {node.name}
+              </span>
+              {node.tag && (
+                <span className="tabular rounded bg-accent px-1.5 py-0.5 text-[9px] font-bold text-white">
+                  {node.tag}
+                </span>
+              )}
             </div>
+
+            <NodeMetrics
+              node={node}
+              data={
+                node.ticker && fundamentals
+                  ? fundamentals[quoteKey("KR", node.ticker)]
+                  : undefined
+              }
+            />
+
+            <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+              {node.role}
+            </p>
           </div>
         ))}
       </div>

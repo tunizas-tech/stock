@@ -6,8 +6,12 @@ import { NextResponse } from "next/server";
 import { getFinnhubQuote } from "@/lib/server/finnhub";
 import { getKisQuote } from "@/lib/server/kis";
 import { mockQuote } from "@/lib/mock-quotes";
+import { mapLimit } from "@/lib/server/map-limit";
 import { quoteKey } from "@/lib/quotes";
 import type { Market, Quote } from "@/lib/types";
+
+const CONCURRENCY = 4;
+const RETRY_DELAY_MS = 400;
 
 interface QuoteRequestItem {
   ticker: string;
@@ -43,14 +47,18 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
+  // KIS 초당 요청 제한 대응 — /api/fundamentals와 같은 방식.
   const quotes: Record<string, Quote> = {};
-  await Promise.all(
-    items.map(async (item) => {
-      const quote = await fetchLive(item).catch(() =>
-        mockQuote(item.ticker, item.market)
-      );
-      quotes[quoteKey(item.market, item.ticker)] = quote;
-    })
-  );
+  const results = await mapLimit(items, CONCURRENCY, async (item) => {
+    try {
+      return await fetchLive(item);
+    } catch {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      return fetchLive(item).catch(() => mockQuote(item.ticker, item.market));
+    }
+  });
+  items.forEach((item, i) => {
+    quotes[quoteKey(item.market, item.ticker)] = results[i];
+  });
   return NextResponse.json({ quotes });
 }
