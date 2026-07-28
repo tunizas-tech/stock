@@ -30,7 +30,13 @@ export default function ValueChainDetailPage({
         <PageHeader kicker="valuechain" title={chain.title} />
       </div>
 
-      <p className="-mt-4 mb-6 max-w-3xl text-sm leading-relaxed text-muted">
+      {chain.status === "draft" && (
+        <p className="-mt-4 mb-4 rounded-lg border border-loss bg-surface px-3 py-2 text-xs font-semibold text-loss">
+          검수 전 초안입니다 — 종목·내용이 바뀔 수 있습니다.
+        </p>
+      )}
+
+      <p className="mb-6 max-w-3xl text-sm leading-relaxed text-muted">
         {chain.summary}
       </p>
 
