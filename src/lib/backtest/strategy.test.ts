@@ -141,6 +141,9 @@ describe("runStrategy — 청산 우선순위", () => {
     expect(trades[0].entryIndex).toBe(3);
     expect(trades[0].exitReason).toBe("stop");
     expect(trades[0].exitIndex).toBe(3);
+    // entryIndex와 exitIndex가 같다는 것으로 holdDays=0을 간접 증명하는 데 그치지
+    // 않고, 진입일 당일 종가로 청산될 수 있다는 holdDays 규약 자체를 직접 못박는다.
+    expect(trades[0].holdDays).toBe(0);
   });
 
   it("RSI 청산과 시간 청산이 같은 날 성립하면 RSI가 이긴다", () => {

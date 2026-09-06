@@ -90,4 +90,25 @@ describe("randomEntries", () => {
 
     expect(after).toEqual(before);
   });
+
+  it("진입 인덱스는 전략과 같은 구간([2, n))에서만 뽑힌다 — 0·1은 나오지 않는다", () => {
+    // runStrategy의 신호 스캔은 i=1부터(crossedUp이 i-1을 봐야 해서) 시작해
+    // entryIndex=i+1의 구조적 최솟값이 2다. 무작위 벤치마크가 0·1도 뽑는다면
+    // "신호 vs 무작위" 비교의 두 표본이 서로 다른 정의역에서 온 셈이 된다.
+    // 여러 시드로 반복 호출해 우연히 큰 값만 뽑히는 시드에 기대지 않게 한다.
+    for (let seed = 0; seed < 20; seed++) {
+      const trades = randomEntries(candles, 10, config(), seed);
+      for (const trade of trades) {
+        expect(trade.entryIndex).toBeGreaterThanOrEqual(2);
+      }
+    }
+  });
+
+  it("유효한 진입 구간이 없을 만큼 짧은 시계열이면 빈 배열을 낸다", () => {
+    // n<=2면 [2, n) 구간이 비어(또는 음의 길이가 되어) 뽑을 진입일이 없다.
+    const tooShort = [candle("2024-01-01", 100), candle("2024-01-02", 101)];
+
+    expect(randomEntries(tooShort, 5, config(), 1)).toEqual([]);
+    expect(randomEntries([], 5, config(), 1)).toEqual([]);
+  });
 });

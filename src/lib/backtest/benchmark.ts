@@ -54,8 +54,17 @@ function mulberry32(seed: number): () => number {
 }
 
 /**
- * count개의 진입일을 [0, n-1] 구간에서 균등 무작위로 뽑은 뒤, 시간순으로 정렬해
+ * count개의 진입일을 [2, n) 구간에서 균등 무작위로 뽑은 뒤, 시간순으로 정렬해
  * strategy.ts와 같은 "한 번에 하나만 보유" 제약으로 청산까지 시뮬레이션한다.
+ *
+ * 하한이 0이 아니라 2인 이유: runStrategy의 신호 스캔은 `crossedUp`이 i-1을 봐야
+ * 해서 i=1부터 시작하고, 진입은 i+1이므로 전략이 도달할 수 있는 entryIndex의
+ * 구조적 최솟값은 2다(strategy.ts의 신호 루프 참고). 무작위 벤치마크가 0·1도
+ * 뽑을 수 있게 두면, "신호가 무작위보다 나은가"를 비교할 때 두 표본이 애초에
+ * 다른 인덱스 구간에서 뽑힌 셈이 되어 비교 자체가 오염된다 — 지금 데이터에서는
+ * 그 두 인덱스가 지표 워밍업 구간에 묻혀 영향이 없더라도, 두 표본의 정의역이
+ * 다르다는 사실 자체가 문제다. 전략의 스캔 시작 지점이 바뀌면 이 하한도 같이
+ * 맞춰야 한다.
  *
  * 뽑은 날짜 중 이전 거래의 청산일 이전(또는 그 안)에 걸리는 것은 건너뛴다 — 다시
  * 뽑지 않는다. 그래서 겹침이 많은 시드는 count보다 적은 거래를 낼 수 있고, 그 개수
@@ -69,14 +78,15 @@ export function randomEntries(
 ): Trade[] {
   const n = candles.length;
   const trades: Trade[] = [];
-  if (n === 0) return trades;
+  const MIN_ENTRY_INDEX = 2; // strategy.ts의 구조적 최소 entryIndex(i=1부터 스캔, 진입은 i+1)와 동기화
+  if (n <= MIN_ENTRY_INDEX) return trades; // 유효한 진입 구간이 없다
 
   const rsiValues = rsi(candles, config.rsiPeriod);
   const rand = mulberry32(seed);
 
   const candidates: number[] = [];
   for (let k = 0; k < count; k++) {
-    candidates.push(Math.floor(rand() * n));
+    candidates.push(MIN_ENTRY_INDEX + Math.floor(rand() * (n - MIN_ENTRY_INDEX)));
   }
   candidates.sort((a, b) => a - b);
 
