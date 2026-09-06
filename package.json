@@ -10,7 +10,8 @@
     "test": "vitest run",
     "news:setup": "node --env-file-if-exists=.env.local scripts/news-setup.mjs",
     "backtest:fetch": "node --env-file-if-exists=.env.local scripts/backtest-fetch.mjs",
-    "backtest:run": "tsx scripts/backtest-run.ts"
+    "backtest:run": "tsx scripts/backtest-run.ts",
+    "backtest:indicators": "tsx scripts/backtest-indicators.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.46.1",
