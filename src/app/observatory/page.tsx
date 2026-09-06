@@ -483,7 +483,7 @@ const VERIFICATION_HISTORY: VerificationRow[] = [
     stage: "5단계",
     question: "외국인·기관 순매수 상위 섹터",
     verdict: "학습 +3.00% → 검증 −2.22% — 부호가 뒤집혔다. 신호가 아니다",
-    source: "정식 스펙 문서 없음 — 진단 스크립트: .superpowers/tmp/flowtest.ts, .superpowers/tmp/flowsplit.ts",
+    source: "docs/superpowers/specs/2026-09-06-flow-observatory-design.md",
   },
 ];
 
