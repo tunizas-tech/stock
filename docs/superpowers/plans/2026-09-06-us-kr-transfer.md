@@ -597,8 +597,13 @@ describe("applyCost", () => {
 });
 
 describe("annualCost", () => {
-  it("왕복 0.4%로 연 50회 매매하면 연 20% 수준이 비용으로 나간다", () => {
-    expect(annualCost(0.004, 50)).toBeCloseTo(0.2, 2);
+  it("왕복 0.4%로 연 50회 매매하면 연 18% 남짓이 비용으로 나간다", () => {
+    // 복리이므로 0.004 * 50 = 0.2 가 아니라 1 - 0.996^50 = 0.1816 이다.
+    expect(annualCost(0.004, 50)).toBeCloseTo(0.1816, 3);
+  });
+
+  it("매매를 안 하면 비용도 0이다", () => {
+    expect(annualCost(0.004, 0)).toBeCloseTo(0, 10);
   });
 });
 ```
@@ -613,8 +618,9 @@ Expected: FAIL — `Cannot find module './cost'`
 ```ts
 // 왕복 거래 비용 — 매수·매도 수수료 + 증권거래세 + 슬리피지.
 //
-// 보유 3~5일이면 연 약 50회 매매이므로 왕복 0.4%는 연 20%가 된다. 그만큼 먼저 벌어야
-// 본전이다. 비용을 빼지 않은 백테스트는 "되는 것처럼 보이는데 실제로는 안 되는" 결과를 낸다.
+// 보유 3~5일이면 연 약 50회 매매이므로 왕복 0.4%는 복리로 연 18% 남짓이 된다. 그만큼
+// 먼저 벌어야 본전이다. 비용을 빼지 않은 백테스트는 "되는 것처럼 보이는데 실제로는
+// 안 되는" 결과를 낸다.
 //
 // 증권거래세율은 최근 몇 년간 반복 개정되었다. 실제 매매에 쓰기 전 현행 세율을 확인할 것.
 
@@ -1222,9 +1228,12 @@ Task 2~6의 로직을 조립해 실제 답을 낸다. `.mjs`가 TS를 import할 
 **Interfaces:**
 - Consumes: `alignUsToKr`, `applyHolidayMode`, `HolidayMode`, `AlignedDay` (Task 2) · `decompose`, `DayReturn` (Task 3) · `applyCost`, `DEFAULT_ROUND_TRIP` (Task 4) · `summarize`, `compare`, `Comparison` (Task 5) · `pearson`, `rollingCorr` (Task 6) · `Candle` (Task 1)
 - Produces:
-  - `interface TransferInput { krCandles: Candle[]; usCandles: Candle[]; mode: HolidayMode; roundTrip: number; window: number; threshold: number }`
-  - `interface TransferReport { corr: { gap: number; intraday: number; closeToClose: number }; rolling: RollingPoint[]; conditional: Comparison; annualCostAt50: number }`
+  - `interface TransferInput { krCandles: Candle[]; usCandles: Candle[]; mode: HolidayMode; roundTrip: number; window: number; threshold: number; horizons: number[] }`
+  - `interface HorizonResult { days: number; comparison: Comparison }`
+  - `interface TransferReport { corr: { gap: number; intraday: number; closeToClose: number }; rolling: RollingPoint[]; conditional: Comparison; horizons: HorizonResult[]; annualCostAt50: number }`
   - `analyzeTransfer(input: TransferInput): TransferReport`
+
+`horizons`는 스펙 §4의 보유 기간이다 — 단기 `3`·`5`일, 중기 `20`·`60`일. `conditional`은 당일 장중(시초가 매수 → 당일 종가 매도)이고, `horizons`는 시초가 매수 → N거래일 뒤 종가 매도다. 둘 다 비용을 적용하고 대조군과 비교한다.
 
 - [ ] **Step 1: 실패하는 테스트를 쓴다**
 
@@ -1267,6 +1276,7 @@ describe("analyzeTransfer", () => {
     roundTrip: 0,
     window: 20,
     threshold: 0.01,
+    horizons: [3, 5],
   });
 
   it("심어둔 관계를 장중 상관에서 강하게 잡아낸다", () => {
@@ -1288,30 +1298,54 @@ describe("analyzeTransfer", () => {
     expect(report.conditional.control.n).toBeGreaterThan(0);
   });
 
+  const withCost = analyzeTransfer({
+    krCandles: kr,
+    usCandles: us,
+    mode: "skip",
+    roundTrip: 0.004,
+    window: 20,
+    threshold: 0.01,
+    horizons: [3, 5],
+  });
+
   it("비용을 0.4%로 주면 신호일 평균이 그만큼 낮아진다", () => {
-    const withCost = analyzeTransfer({
-      krCandles: kr,
-      usCandles: us,
-      mode: "skip",
-      roundTrip: 0.004,
-      window: 20,
-      threshold: 0.01,
-    });
     expect(withCost.conditional.signal.mean).toBeLessThan(
       report.conditional.signal.mean
     );
   });
 
   it("연 50회 매매 기준 비용을 같이 낸다", () => {
-    const withCost = analyzeTransfer({
+    // 복리이므로 1 - 0.996^50 = 0.1816
+    expect(withCost.annualCostAt50).toBeCloseTo(0.1816, 3);
+  });
+
+  it("요청한 보유 기간마다 대조군 비교를 낸다", () => {
+    expect(report.horizons.map((h) => h.days)).toEqual([3, 5]);
+    for (const h of report.horizons) {
+      expect(h.comparison.signal.n).toBeGreaterThan(0);
+      expect(h.comparison.control.n).toBeGreaterThan(0);
+    }
+  });
+
+  it("보유 기간 성과에도 비용이 적용된다", () => {
+    for (let i = 0; i < report.horizons.length; i++) {
+      expect(withCost.horizons[i].comparison.signal.mean).toBeLessThan(
+        report.horizons[i].comparison.signal.mean
+      );
+    }
+  });
+
+  it("horizons가 비면 보유 기간 결과도 비어 있다", () => {
+    const none = analyzeTransfer({
       krCandles: kr,
       usCandles: us,
       mode: "skip",
-      roundTrip: 0.004,
+      roundTrip: 0,
       window: 20,
       threshold: 0.01,
+      horizons: [],
     });
-    expect(withCost.annualCostAt50).toBeCloseTo(0.2, 2);
+    expect(none.horizons).toEqual([]);
   });
 });
 ```
@@ -1343,7 +1377,7 @@ Expected: FAIL — `Cannot find module './run'`
 
 import type { Candle } from "../types";
 import { alignUsToKr, applyHolidayMode, type HolidayMode } from "./align";
-import { decompose } from "./returns";
+import { decompose, holdReturn } from "./returns";
 import { applyCost, annualCost } from "./cost";
 import { compare, type Comparison } from "./stats";
 import { pearson, rollingCorr, type RollingPoint } from "./transfer";
@@ -1357,17 +1391,28 @@ export interface TransferInput {
   window: number;
   /** 신호로 볼 미국 등락률 하한. 0.01이면 +1% 이상인 날. */
   threshold: number;
+  /** 보유 기간(거래일). 단기 3·5일, 중기 20·60일. */
+  horizons: number[];
+}
+
+export interface HorizonResult {
+  days: number;
+  comparison: Comparison;
 }
 
 export interface TransferReport {
   corr: { gap: number; intraday: number; closeToClose: number };
   rolling: RollingPoint[];
+  /** 당일 장중 — 시초가 매수 → 당일 종가 매도. */
   conditional: Comparison;
+  /** 보유 기간별 — 시초가 매수 → N거래일 뒤 종가 매도. */
+  horizons: HorizonResult[];
   annualCostAt50: number;
 }
 
 export function analyzeTransfer(input: TransferInput): TransferReport {
-  const { krCandles, usCandles, mode, roundTrip, window, threshold } = input;
+  const { krCandles, usCandles, mode, roundTrip, window, threshold, horizons } =
+    input;
 
   const krRet = decompose(krCandles);
   const usRet = decompose(usCandles);
@@ -1417,6 +1462,22 @@ export function analyzeTransfer(input: TransferInput): TransferReport {
     else controlDays.push(net[i]);
   }
 
+  // 보유 기간별 성과: 신호일 시초가에 사서 N거래일 뒤 종가에 판다.
+  // 데이터 끝을 넘는 표본은 holdReturn이 undefined를 내므로 제외된다.
+  const krIndex = new Map(krCandles.map((c, i) => [c.date, i]));
+  const horizonResults: HorizonResult[] = horizons.map((days) => {
+    const sig: number[] = [];
+    const ctl: number[] = [];
+    for (let i = 0; i < dates.length; i++) {
+      const idx = krIndex.get(dates[i]);
+      if (idx === undefined) continue;
+      const gross = holdReturn(krCandles, idx, days);
+      if (gross === undefined) continue;
+      (signal[i] >= threshold ? sig : ctl).push(applyCost(gross, roundTrip));
+    }
+    return { days, comparison: compare(sig, ctl) };
+  });
+
   return {
     corr: {
       gap: pearson(signal, gap),
@@ -1425,6 +1486,7 @@ export function analyzeTransfer(input: TransferInput): TransferReport {
     },
     rolling: rollingCorr(dates, signal, intraday, window),
     conditional: compare(signalDays, controlDays),
+    horizons: horizonResults,
     annualCostAt50: annualCost(roundTrip, 50),
   };
 }
@@ -1492,6 +1554,7 @@ for (const kr of KR) {
       roundTrip: DEFAULT_ROUND_TRIP,
       window: 250,
       threshold: 0.01,
+      horizons: [3, 5, 20, 60],
     });
     const s = r.conditional.signal;
     const c = r.conditional.control;
@@ -1501,6 +1564,18 @@ for (const kr of KR) {
         `${pct(s.mean).padStart(11)} ${pct(c.mean).padStart(12)} ${pct(r.conditional.deltaMean).padStart(8)} ` +
         `${String(s.n).padStart(7)} ${pct(s.winRate).padStart(7)} ${n2(s.payoff).padStart(7)} ${pct(s.mdd).padStart(7)}`
     );
+
+    // 보유 기간별 성과 — 스펙 §4의 단기 3·5일, 중기 20·60일.
+    for (const h of r.horizons) {
+      const hs = h.comparison.signal;
+      const hc = h.comparison.control;
+      console.log(
+        `  └ ${String(h.days).padStart(2)}일 보유: 신호 ${pct(hs.mean).padStart(8)} ` +
+          `대조 ${pct(hc.mean).padStart(8)} 차이 ${pct(h.comparison.deltaMean).padStart(8)} ` +
+          `n=${String(hs.n).padStart(5)} 승률 ${pct(hs.winRate).padStart(7)} ` +
+          `손익비 ${n2(hs.payoff).padStart(5)} MDD ${pct(hs.mdd).padStart(7)}`
+      );
+    }
 
     // 롤링 상관을 연 단위로 요약해 변곡점을 눈으로 찾는다.
     const byYear = new Map<string, number[]>();
