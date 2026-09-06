@@ -31,6 +31,10 @@ npm run dev      # http://localhost:3000
 - ✅ 차트: `/api/candles` 프록시(KIS 기간별시세 4종 — 국내외 종목·지수) + recharts 캔들차트. 대시보드 지수 + 종목 모달, 일·주·월봉
 - ✅ **A** 실시세: `/api/quotes` 서버 프록시(KR: KIS, US: Finnhub). 키가 없거나 조회 실패 시 mock 폴백 — 무설정 동작 유지
 
+## 서버 배포
+
+Coolify에 올리는 절차는 [docs/deploy-coolify.md](./docs/deploy-coolify.md). 인증(`APP_USER`/`APP_PASS`)·볼륨·예약 작업·초기 데이터 복사를 다룬다.
+
 ## 선택 설정
 
 `.env.local.example`를 `.env.local`로 복사해 값을 채우면:
