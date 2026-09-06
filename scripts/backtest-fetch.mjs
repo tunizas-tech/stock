@@ -2,7 +2,7 @@
 //   npm run backtest:fetch
 // 백테스트는 설정을 바꿔가며 수백 번 도는 물건이라 매번 API를 호출하면 즉시 차단된다.
 // 여러 번 실행해도 안전하다(이미 받은 구간은 건너뛴다).
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
 const BASE = "https://openapi.koreainvestment.com:9443";
@@ -31,24 +31,42 @@ if (!appkey || !appsecret) {
   process.exit(1);
 }
 
+// 같은 디렉터리에 임시 파일로 쓴 뒤 rename — 중간에 죽어도 대상 파일은 항상 온전하다.
+async function atomicWrite(path, data) {
+  const tmp = `${path}.tmp-${process.pid}`;
+  await writeFile(tmp, data);
+  await rename(tmp, path);
+}
+
 // ── 토큰: 발급 자체에 분당 제한이 있어 파일에 캐시한다 ──────────────────────
 async function getToken() {
   if (existsSync(TOKEN_FILE)) {
-    const c = JSON.parse(await readFile(TOKEN_FILE, "utf8"));
-    if (c.expiresAt > Date.now()) {
-      console.log("  캐시된 토큰 재사용");
-      return c.token;
+    try {
+      const c = JSON.parse(await readFile(TOKEN_FILE, "utf8"));
+      if (c.expiresAt > Date.now()) {
+        console.log("  캐시된 토큰 재사용");
+        return c.token;
+      }
+    } catch (e) {
+      console.log(`  경고: 토큰 캐시 파일이 손상되어 무시합니다 (${TOKEN_FILE}) — 새로 발급합니다.`);
     }
   }
   for (let i = 1; i <= 8; i++) {
-    const res = await fetch(`${BASE}/oauth2/tokenP`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ grant_type: "client_credentials", appkey, appsecret }),
-    });
-    const body = await res.json();
+    let body;
+    try {
+      const res = await fetch(`${BASE}/oauth2/tokenP`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ grant_type: "client_credentials", appkey, appsecret }),
+      });
+      body = await res.json();
+    } catch (e) {
+      console.log(`  토큰 대기 ${i}/8 — 네트워크/응답 오류: ${e.message}`);
+      await sleep(30000);
+      continue;
+    }
     if (body.access_token) {
-      await writeFile(
+      await atomicWrite(
         TOKEN_FILE,
         JSON.stringify({
           token: body.access_token,
@@ -65,6 +83,9 @@ async function getToken() {
 }
 
 // ── 조회: rt_cd를 반드시 검사한다. 안 하면 오류가 빈 배열로 위장된다 ───────
+// fetch/파싱 자체가 던지는 예외(네트워크 오류, 502/504 HTML 오류 페이지 등)도
+// rt_cd 실패와 동일하게 취급해 재시도한다 — 안 그러면 4회 재시도 로직이
+// 정작 필요한 순간(네트워크 불안정)에 우회되어 프로세스가 죽는다.
 async function fetchChunk(token, idx, from, to) {
   const isKR = idx.market === "KR";
   const path = isKR
@@ -75,14 +96,22 @@ async function fetchChunk(token, idx, from, to) {
     `FID_COND_MRKT_DIV_CODE=${isKR ? "U" : "N"}` +
     `&FID_INPUT_ISCD=${encodeURIComponent(idx.code)}` +
     `&FID_INPUT_DATE_1=${from}&FID_INPUT_DATE_2=${to}&FID_PERIOD_DIV_CODE=D`;
+  const name = `${idx.label}(${idx.market}-${idx.code})`;
 
   for (let attempt = 1; attempt <= 4; attempt++) {
-    const res = await fetch(`${BASE}${path}?${qs}`, {
-      headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: trId, custtype: "P" },
-    });
-    const body = await res.json();
+    let body;
+    try {
+      const res = await fetch(`${BASE}${path}?${qs}`, {
+        headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: trId, custtype: "P" },
+      });
+      body = await res.json();
+    } catch (e) {
+      if (attempt === 4) throw new Error(`조회 실패 ${name}: ${e.message}`);
+      await sleep(GAP_MS * 2);
+      continue;
+    }
     if (body.rt_cd === "0") return body.output2 ?? [];
-    if (attempt === 4) throw new Error(`조회 실패 ${idx.code}: ${body.msg1?.trim() ?? body.rt_cd}`);
+    if (attempt === 4) throw new Error(`조회 실패 ${name}: ${body.msg1?.trim() ?? body.rt_cd}`);
     await sleep(GAP_MS * 2);
   }
 }
@@ -107,9 +136,13 @@ async function loadIndex(token, idx) {
   const seen = new Map(); // date -> candle
 
   if (existsSync(file)) {
-    const prev = JSON.parse(await readFile(file, "utf8"));
-    for (const c of prev.candles) seen.set(c.date, c);
-    console.log(`  기존 ${prev.candles.length}건 로드`);
+    try {
+      const prev = JSON.parse(await readFile(file, "utf8"));
+      for (const c of prev.candles) seen.set(c.date, c);
+      console.log(`  기존 ${prev.candles.length}건 로드`);
+    } catch (e) {
+      console.log(`  경고: 기존 파일이 손상되어 무시합니다 (${file}) — 처음부터 다시 적재합니다.`);
+    }
   }
 
   const isKR = idx.market === "KR";
@@ -142,7 +175,7 @@ async function loadIndex(token, idx) {
   }
 
   const candles = [...seen.values()].sort((a, b) => a.date.localeCompare(b.date));
-  await writeFile(
+  await atomicWrite(
     file,
     JSON.stringify(
       {
