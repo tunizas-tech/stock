@@ -11,6 +11,7 @@
     "news:setup": "node --env-file-if-exists=.env.local scripts/news-setup.mjs",
     "backtest:fetch": "node --env-file-if-exists=.env.local scripts/backtest-fetch.mjs",
     "flow:fetch": "node --env-file-if-exists=.env.local scripts/flow-fetch.mjs",
+    "flow:backfill": "node scripts/flow-backfill.mjs",
     "backtest:run": "tsx scripts/backtest-run.ts",
     "backtest:indicators": "tsx scripts/backtest-indicators.ts",
     "backtest:rotation": "tsx scripts/backtest-rotation.ts"
