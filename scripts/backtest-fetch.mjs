@@ -1,7 +1,12 @@
-// 백테스트용 지수 일봉 적재 — 한 번 받아 파일로 떨어뜨린다.
+// 백테스트용 일봉 적재 — 한 번 받아 파일로 떨어뜨린다.
 //   npm run backtest:fetch
 // 백테스트는 설정을 바꿔가며 수백 번 도는 물건이라 매번 API를 호출하면 즉시 차단된다.
 // 여러 번 실행해도 안전하다(이미 받은 구간은 건너뛴다).
+//
+// 대상은 두 종류다.
+//   kind: "index" — 지수. 국내(FHKUP03500100)/해외(FHKST03030100) 지수 전용 엔드포인트.
+//   kind: "etf"   — 개별 종목(ETF). 국내(FHKST03010100)/해외(HHDFS76240000) 주식 시세 엔드포인트.
+//                    필드명이 지수와 달라(해외는 특히 xymd/clos/tvol/tamt) 응답 매핑을 따로 둔다.
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
@@ -15,11 +20,23 @@ const appsecret = process.env.KIS_APP_SECRET;
 
 // code는 KIS 지수 코드. src/lib/indices.ts와 같은 목록이다.
 const INDICES = [
-  { market: "KR", code: "0001", label: "코스피", from: "19970101" },
-  { market: "KR", code: "1001", label: "코스닥", from: "19970101" },
-  { market: "US", code: "COMP", label: "나스닥", from: "20000101" },
-  { market: "US", code: "SPX", label: "S&P 500", from: "20000101" },
-  { market: "US", code: ".DJI", label: "다우존스", from: "20000101" },
+  { market: "KR", code: "0001", kind: "index", label: "코스피", from: "19970101" },
+  { market: "KR", code: "1001", kind: "index", label: "코스닥", from: "19970101" },
+  { market: "US", code: "COMP", kind: "index", label: "나스닥", from: "20000101" },
+  { market: "US", code: "SPX", kind: "index", label: "S&P 500", from: "20000101" },
+  { market: "US", code: ".DJI", kind: "index", label: "다우존스", from: "20000101" },
+];
+
+// 2단계: 섹터 ETF 3쌍(반도체/IT/헬스케어). 양쪽 모두 10년 이상 데이터가 있는 것만 쓴다.
+// 조선·방산 ETF는 국내 상장이 2023~2024년이라 신호일이 100~150개뿐이라 제외했다(스펙 §12 참고).
+// 해외 ETF는 거래소(excd)를 명시해야 한다 — 해외지수와 달리 종목은 거래소별로 조회한다.
+const SECTOR_ETFS = [
+  { market: "KR", code: "091160", kind: "etf", label: "KODEX 반도체", from: "20100101" },
+  { market: "US", code: "SOXX", kind: "etf", label: "SOXX", excd: "NAS", from: "20100101" },
+  { market: "KR", code: "139260", kind: "etf", label: "TIGER 200 IT", from: "20100101" },
+  { market: "US", code: "XLK", kind: "etf", label: "XLK", excd: "AMS", from: "20100101" },
+  { market: "KR", code: "143860", kind: "etf", label: "TIGER 헬스케어", from: "20100101" },
+  { market: "US", code: "XLV", kind: "etf", label: "XLV", excd: "AMS", from: "20100101" },
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -82,21 +99,48 @@ async function getToken() {
   throw new Error("토큰 발급 실패");
 }
 
+// ── 요청 조립: kind(지수/ETF) × market(국내/해외) 조합별로 경로·tr_id·파라미터가 다르다 ──
+// 기존 지수 5종의 분기는 그대로 남겨 요청 URL이 바뀌지 않도록 한다.
+function buildRequest(target, from, to) {
+  if (target.kind === "index") {
+    const isKR = target.market === "KR";
+    const path = isKR
+      ? "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice"
+      : "/uapi/overseas-price/v1/quotations/inquire-daily-chartprice";
+    const trId = isKR ? "FHKUP03500100" : "FHKST03030100";
+    const qs =
+      `FID_COND_MRKT_DIV_CODE=${isKR ? "U" : "N"}` +
+      `&FID_INPUT_ISCD=${encodeURIComponent(target.code)}` +
+      `&FID_INPUT_DATE_1=${from}&FID_INPUT_DATE_2=${to}&FID_PERIOD_DIV_CODE=D`;
+    return { path, trId, qs };
+  }
+  // kind === "etf"
+  if (target.market === "KR") {
+    // 국내주식 기간별시세. FID_ORG_ADJ_PRC=0 이 수정주가(분배락 등 반영) — kis.ts와 동일하게 맞춘다.
+    const path = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice";
+    const trId = "FHKST03010100";
+    const qs =
+      `FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=${encodeURIComponent(target.code)}` +
+      `&FID_INPUT_DATE_1=${from}&FID_INPUT_DATE_2=${to}&FID_PERIOD_DIV_CODE=D&FID_ORG_ADJ_PRC=0`;
+    return { path, trId, qs };
+  }
+  // 해외주식 기간별시세. 날짜 구간이 아니라 BYMD(종료일) 기준으로 최근 ~100건을 준다.
+  // MODP=1 이 수정주가(배당락 반영) — kis.ts와 동일하게 맞춘다.
+  const path = "/uapi/overseas-price/v1/quotations/dailyprice";
+  const trId = "HHDFS76240000";
+  const qs =
+    `AUTH=&EXCD=${target.excd}&SYMB=${encodeURIComponent(target.code)}` +
+    `&GUBN=0&BYMD=${to}&MODP=1`;
+  return { path, trId, qs };
+}
+
 // ── 조회: rt_cd를 반드시 검사한다. 안 하면 오류가 빈 배열로 위장된다 ───────
 // fetch/파싱 자체가 던지는 예외(네트워크 오류, 502/504 HTML 오류 페이지 등)도
 // rt_cd 실패와 동일하게 취급해 재시도한다 — 안 그러면 4회 재시도 로직이
 // 정작 필요한 순간(네트워크 불안정)에 우회되어 프로세스가 죽는다.
-async function fetchChunk(token, idx, from, to) {
-  const isKR = idx.market === "KR";
-  const path = isKR
-    ? "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice"
-    : "/uapi/overseas-price/v1/quotations/inquire-daily-chartprice";
-  const trId = isKR ? "FHKUP03500100" : "FHKST03030100";
-  const qs =
-    `FID_COND_MRKT_DIV_CODE=${isKR ? "U" : "N"}` +
-    `&FID_INPUT_ISCD=${encodeURIComponent(idx.code)}` +
-    `&FID_INPUT_DATE_1=${from}&FID_INPUT_DATE_2=${to}&FID_PERIOD_DIV_CODE=D`;
-  const name = `${idx.label}(${idx.market}-${idx.code})`;
+async function fetchChunk(token, target, from, to) {
+  const { path, trId, qs } = buildRequest(target, from, to);
+  const name = `${target.label}(${target.market}-${target.code})`;
 
   for (let attempt = 1; attempt <= 4; attempt++) {
     let body;
@@ -116,24 +160,58 @@ async function fetchChunk(token, idx, from, to) {
   }
 }
 
-function toCandle(row, isKR) {
+// 응답 행에서 날짜가 담긴 필드명 — 해외 ETF만 다르다(xymd, 나머지는 stck_bsop_date).
+function dateField(target) {
+  return target.kind === "etf" && target.market === "US" ? "xymd" : "stck_bsop_date";
+}
+
+function toCandle(row, target) {
   const num = (v) => (v === undefined || v === "" ? undefined : Number(v));
+
+  if (target.kind === "index") {
+    const isKR = target.market === "KR";
+    return {
+      date: iso(row.stck_bsop_date),
+      open: Number(isKR ? row.bstp_nmix_oprc : row.ovrs_nmix_oprc),
+      high: Number(isKR ? row.bstp_nmix_hgpr : row.ovrs_nmix_hgpr),
+      low: Number(isKR ? row.bstp_nmix_lwpr : row.ovrs_nmix_lwpr),
+      close: Number(isKR ? row.bstp_nmix_prpr : row.ovrs_nmix_prpr),
+      volume: num(row.acml_vol),
+      value: isKR ? num(row.acml_tr_pbmn) : undefined,
+    };
+  }
+
+  if (target.market === "KR") {
+    // 국내 ETF — 국내주식 기간별시세. 필드명은 지수와 다르지만(stck_oprc 등) 날짜/거래량 필드는 같다.
+    return {
+      date: iso(row.stck_bsop_date),
+      open: Number(row.stck_oprc),
+      high: Number(row.stck_hgpr),
+      low: Number(row.stck_lwpr),
+      close: Number(row.stck_clpr),
+      volume: num(row.acml_vol),
+      value: num(row.acml_tr_pbmn),
+    };
+  }
+
+  // 해외 ETF — 해외주식 기간별시세. 지수(ovrs_nmix_*)와 전혀 다른 필드명(xymd/clos/tvol/tamt)을 쓴다.
   return {
-    date: iso(row.stck_bsop_date),
-    open: Number(isKR ? row.bstp_nmix_oprc : row.ovrs_nmix_oprc),
-    high: Number(isKR ? row.bstp_nmix_hgpr : row.ovrs_nmix_hgpr),
-    low: Number(isKR ? row.bstp_nmix_lwpr : row.ovrs_nmix_lwpr),
-    close: Number(isKR ? row.bstp_nmix_prpr : row.ovrs_nmix_prpr),
-    volume: num(row.acml_vol),
-    value: isKR ? num(row.acml_tr_pbmn) : undefined,
+    date: iso(row.xymd),
+    open: Number(row.open),
+    high: Number(row.high),
+    low: Number(row.low),
+    close: Number(row.clos),
+    volume: num(row.tvol),
+    value: num(row.tamt),
   };
 }
 
 // ── 적재: 1회 반환에 상한이 있으므로 끝 날짜를 뒤로 밀어가며 반복한다 ───────
 // 상한이 50이든 100이든 동작하므로 정확한 값을 알 필요가 없다.
-async function loadIndex(token, idx) {
-  const file = `${OUT_DIR}/${idx.market}-${idx.code}-D.json`;
+async function loadTarget(token, target) {
+  const file = `${OUT_DIR}/${target.market}-${target.code}-D.json`;
   const seen = new Map(); // date -> candle
+  const dField = dateField(target);
 
   if (existsSync(file)) {
     try {
@@ -145,21 +223,20 @@ async function loadIndex(token, idx) {
     }
   }
 
-  const isKR = idx.market === "KR";
   let cursor = ymd(new Date());
   let stalls = 0;
 
-  while (cursor > idx.from && stalls < 3) {
-    const rows = await fetchChunk(token, idx, idx.from, cursor);
+  while (cursor > target.from && stalls < 3) {
+    const rows = await fetchChunk(token, target, target.from, cursor);
     if (rows.length === 0) break;
 
     const before = seen.size;
     let oldest = cursor;
     for (const row of rows) {
-      if (!row.stck_bsop_date) continue;
-      const c = toCandle(row, isKR);
+      if (!row[dField]) continue;
+      const c = toCandle(row, target);
       seen.set(c.date, c);
-      if (row.stck_bsop_date < oldest) oldest = row.stck_bsop_date;
+      if (row[dField] < oldest) oldest = row[dField];
     }
 
     // 새로 얻은 게 없으면 더 밀어도 소용없다. 3번 연속이면 중단.
@@ -170,7 +247,7 @@ async function loadIndex(token, idx) {
     d.setUTCDate(d.getUTCDate() - 1);
     cursor = ymd(d);
 
-    process.stdout.write(`\r  ${idx.label}: ${seen.size}건 (${iso(oldest)}까지)   `);
+    process.stdout.write(`\r  ${target.label}: ${seen.size}건 (${iso(oldest)}까지)   `);
     await sleep(GAP_MS);
   }
 
@@ -179,10 +256,10 @@ async function loadIndex(token, idx) {
     file,
     JSON.stringify(
       {
-        market: idx.market,
-        code: idx.code,
-        kind: "index",
-        label: idx.label,
+        market: target.market,
+        code: target.code,
+        kind: target.kind,
+        label: target.label,
         period: "D",
         fetchedAt: new Date().toISOString(),
         candles,
@@ -191,7 +268,7 @@ async function loadIndex(token, idx) {
       0
     )
   );
-  console.log(`\r  ${idx.label}: ${candles.length}건 저장 (${candles[0]?.date} ~ ${candles.at(-1)?.date})`);
+  console.log(`\r  ${target.label}: ${candles.length}건 저장 (${candles[0]?.date} ~ ${candles.at(-1)?.date})`);
 }
 
 await mkdir(OUT_DIR, { recursive: true });
@@ -199,6 +276,9 @@ console.log("\n[1] 토큰");
 const token = await getToken();
 
 console.log("\n[2] 지수 일봉 적재 (25년치, 약 10분)");
-for (const idx of INDICES) await loadIndex(token, idx);
+for (const idx of INDICES) await loadTarget(token, idx);
+
+console.log("\n[3] 섹터 ETF 일봉 적재 (반도체/IT/헬스케어, 15년치)");
+for (const etf of SECTOR_ETFS) await loadTarget(token, etf);
 
 console.log("\n완료. 다음: npm run backtest:run\n");
