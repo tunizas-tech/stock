@@ -38,4 +38,8 @@ describe("rollingCorr", () => {
   it("표본이 창보다 적으면 빈 배열이다", () => {
     expect(rollingCorr(["d1"], [1], [2], 3)).toEqual([]);
   });
+
+  it("길이가 다르면 던진다", () => {
+    expect(() => rollingCorr(["d1", "d2"], [1, 2], [1], 2)).toThrow();
+  });
 });

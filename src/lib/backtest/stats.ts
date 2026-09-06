@@ -10,7 +10,7 @@ export interface Summary {
   n: number;
   winRate: number;
   mean: number;
-  /** 평균이익 / 평균손실(절대값). 손실이 없으면 Infinity. */
+  /** 평균이익 / 평균손실(절대값). 손실이 없으면 Infinity, 이익이 없으면 NaN — 둘 다 의도된 값이고 보고서에서 "-"로 찍는다. */
   payoff: number;
   /** 누적 곡선 최대낙폭. 양수 비율(0.25 = -25%). */
   mdd: number;
@@ -36,7 +36,12 @@ export function summarize(returns: number[]): Summary {
     n: returns.length,
     winRate: wins.length / returns.length,
     mean: avg(returns),
-    payoff: losses.length === 0 ? Infinity : avg(wins) / Math.abs(avg(losses)),
+    payoff:
+      losses.length === 0
+        ? Infinity
+        : wins.length === 0
+          ? NaN
+          : avg(wins) / Math.abs(avg(losses)),
     mdd,
   };
 }

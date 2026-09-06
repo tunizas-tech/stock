@@ -27,6 +27,10 @@ describe("summarize", () => {
     expect(summarize([0.1, 0.2]).payoff).toBe(Infinity);
   });
 
+  it("이익이 없고 손실만 있으면 손익비는 NaN이다", () => {
+    expect(summarize([-0.1, -0.2]).payoff).toBeNaN();
+  });
+
   it("빈 입력이면 표본 0에 나머지는 0이다", () => {
     expect(summarize([])).toEqual({
       n: 0,
@@ -43,10 +47,10 @@ describe("compare", () => {
     const out = compare([0.1, 0.1, -0.05], [0.0, 0.0, -0.05]);
     expect(out.signal.n).toBe(3);
     expect(out.control.n).toBe(3);
-    expect(out.deltaMean).toBeCloseTo(out.signal.mean - out.control.mean, 10);
-    expect(out.deltaWinRate).toBeCloseTo(
-      out.signal.winRate - out.control.winRate,
-      10
-    );
+    // signal: mean = (0.1+0.1-0.05)/3 = 0.05, winRate = 2/3
+    // control: mean = (0+0-0.05)/3 = -1/60, winRate = 0
+    // deltaMean = 0.05 - (-1/60) = 1/15, deltaWinRate = 2/3 - 0 = 2/3
+    expect(out.deltaMean).toBeCloseTo(1 / 15, 10);
+    expect(out.deltaWinRate).toBeCloseTo(2 / 3, 10);
   });
 });
