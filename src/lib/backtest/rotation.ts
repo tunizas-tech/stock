@@ -33,45 +33,50 @@ export interface RotationResult {
   monthsHeldByAsset: Record<string, number>;
 }
 
-interface DatedEntry {
-  candle: Candle;
-  /** 이 자산 "자기" candles 배열에서의 인덱스 — 공통 캘린더 인덱스가 아니다. */
-  ownIndex: number;
-}
-
 interface Candidate {
   decideDate: string;
   tradeDate: string;
   held: string[];
 }
 
-/** dateMaps에서 특정 자산의 특정 날짜 항목을 찾는다. 공통 캘린더에서 나온
+/** candles가 날짜 오름차순이라는 입력 계약이 깨지면 공통 캘린더 인덱스 계산
+ * 전체가 조용히 틀어진다(뒤에서 lookback을 공통 캘린더 인덱스로 재기 때문에,
+ * 순서가 깨진 자산 하나가 전체 재조정을 오염시킬 수 있다). 정렬해서 넘어가는
+ * 대신 바로 던진다 — 호출자의 데이터 문제를 여기서 삼키면 원인을 못 찾는다. */
+function assertAscending(label: string, candles: Candle[]): void {
+  for (let i = 1; i < candles.length; i++) {
+    if (candles[i].date <= candles[i - 1].date) {
+      throw new Error(
+        `${label}의 candles가 날짜 오름차순이 아닙니다 (인덱스 ${i}: ${candles[i - 1].date} → ${candles[i].date})`
+      );
+    }
+  }
+}
+
+/** dateMaps에서 특정 자산의 특정 날짜 캔들을 찾는다. 공통 캘린더에서 나온
  * 날짜라면 모든 자산에 반드시 존재해야 하므로, 없으면 교집합 계산이 잘못된
  * 것이다 — 조용히 undefined를 넘기지 않고 바로 드러낸다. */
 function entryAt(
-  dateMaps: Map<string, Map<string, DatedEntry>>,
+  dateMaps: Map<string, Map<string, Candle>>,
   label: string,
   date: string
-): DatedEntry {
-  const entry = dateMaps.get(label)?.get(date);
-  if (!entry) {
+): Candle {
+  const candle = dateMaps.get(label)?.get(date);
+  if (!candle) {
     throw new Error(`공통 캘린더 날짜 ${date}에 ${label}의 캔들이 없습니다`);
   }
-  return entry;
+  return candle;
 }
 
 export function runRotation(input: RotationInput): RotationResult {
   const { assets, lookback, topK, roundTrip, from } = input;
 
-  // 자산별 날짜 → (캔들, 자기 배열 인덱스) 맵. 상대강도의 lookback은 공통
-  // 캘린더 인덱스가 아니라 각 자산 "자기" 거래일 기준으로 잰다 — 후발 상장
-  // 자산 때문에 공통 캘린더가 짧아지더라도, 먼저 상장된 자산은 자기 데이터로
-  // lookback거래일 수익률을 온전히 계산할 수 있어야 공정한 비교가 된다.
-  // (candles가 "서로 다른 길이일 수 있다"는 조건이 여기서 의미를 가진다.)
-  const dateMaps = new Map<string, Map<string, DatedEntry>>();
+  // 자산별 날짜 → 캔들 맵.
+  const dateMaps = new Map<string, Map<string, Candle>>();
   for (const a of assets) {
-    const m = new Map<string, DatedEntry>();
-    a.candles.forEach((candle, ownIndex) => m.set(candle.date, { candle, ownIndex }));
+    assertAscending(a.label, a.candles);
+    const m = new Map<string, Candle>();
+    for (const candle of a.candles) m.set(candle.date, candle);
     dateMaps.set(a.label, m);
   }
 
@@ -95,26 +100,29 @@ export function runRotation(input: RotationInput): RotationResult {
     if (ym !== nextYm) monthEndIndices.push(i);
   }
 
-  // 재조정 후보: 순위를 매길 수 있고(모든 자산이 lookback만큼의 과거를 가짐)
+  // 재조정 후보: 순위를 매길 수 있고(공통 캘린더상 lookback만큼의 과거가 있음)
   // 매수할 수 있는(d+1이 존재) 월말만 후보로 남긴다.
+  //
+  // lookback의 anchor(과거 기준일)는 반드시 공통 캘린더 인덱스로 잡아야 한다.
+  // 자산 "자기" 배열 인덱스로 재면, 다른 자산엔 없는 날짜(개별 종목 거래정지 등)가
+  // 그 자산의 인덱스만 밀어 서로 다른 실제 달력일을 anchor로 잡게 된다 —
+  // 순위가 서로 다른 기간의 수익률을 비교하는 셈이 되어 비교 자체가 무너진다.
+  // 공통 캘린더에서 뽑은 날짜는 교집합의 정의상 모든 자산에 반드시 존재하므로,
+  // entryAt의 "없으면 던진다" 가드가 그대로 무결성 검증이 된다.
   const candidates: Candidate[] = [];
   for (const i of monthEndIndices) {
     const decideDate = common[i];
     if (i + 1 >= common.length) break; // 다음 거래일이 없다 — 여기가 항상 마지막 반복이다
     const tradeDate = common[i + 1];
 
-    const ranked: { label: string; ret: number }[] = [];
-    let sufficientForAll = true;
-    for (const a of assets) {
-      const entry = entryAt(dateMaps, a.label, decideDate);
-      if (entry.ownIndex < lookback) {
-        sufficientForAll = false;
-        break;
-      }
-      const past = a.candles[entry.ownIndex - lookback];
-      ranked.push({ label: a.label, ret: entry.candle.close / past.close - 1 });
-    }
-    if (!sufficientForAll) continue; // 한 종목이라도 lookback치 과거가 없으면 이 재조정 자체를 건너뛴다
+    if (i < lookback) continue; // 공통 캘린더상 lookback치 과거가 없으면 이 재조정 자체를 건너뛴다
+    const pastDate = common[i - lookback];
+
+    const ranked = assets.map((a) => {
+      const cur = entryAt(dateMaps, a.label, decideDate);
+      const past = entryAt(dateMaps, a.label, pastDate);
+      return { label: a.label, ret: cur.close / past.close - 1 };
+    });
 
     // 수익률 내림차순, 동점은 label 오름차순 — 비교 함수 자체가 완전순서를
     // 주므로 Array.prototype.sort의 안정성 여부와 무관하게 결과가 결정적이다.
@@ -140,8 +148,8 @@ export function runRotation(input: RotationInput): RotationResult {
     // 기간 수익: 보유 종목 각각 진입 시가 → 청산 시가. 균등 비중이므로 평균.
     let grossSum = 0;
     for (const label of held) {
-      const entryOpen = entryAt(dateMaps, label, cur.tradeDate).candle.open;
-      const exitOpen = entryAt(dateMaps, label, next.tradeDate).candle.open;
+      const entryOpen = entryAt(dateMaps, label, cur.tradeDate).open;
+      const exitOpen = entryAt(dateMaps, label, next.tradeDate).open;
       grossSum += exitOpen / entryOpen - 1;
     }
     const grossReturn = grossSum / held.length;

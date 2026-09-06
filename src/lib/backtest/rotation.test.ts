@@ -166,6 +166,62 @@ describe("runRotation — lookback 부족 구간", () => {
   });
 });
 
+describe("runRotation — 상대강도 lookback은 공통 캘린더 기준이다(자산별 자기 인덱스가 아니다)", () => {
+  it("한 자산에만 있는 결측 구간이 lookback 창 안에 있어도, 공유 구간에서 경제적으로 동일한 두 자산은 동일하게 평가된다", () => {
+    // A는 2023-11-03에 다른 자산엔 없는 캔들을 하나 더 가진다("g" — 개별 종목
+    // 거래정지 복귀처럼 한 종목에만 있는 결측/추가). 이 날짜는 공통 캘린더에서
+    // 빠지므로 판정·매매에는 등장하지 않지만, "자기 배열 인덱스"로 lookback을
+    // 재면 A의 인덱스가 하루 밀려 다른 anchor(과거 기준일)를 잡게 된다.
+    //
+    // A·B는 공통 캘린더상 실제로 공유하는 날짜(c0~c3)의 종가가 완전히 같다 —
+    // "경제적으로 동일한 가격 경로"다. 그런데 자기 인덱스 기준으로 재면:
+    //   A: own array = [c0,c1,g,c2,c3,...] → c3의 ownIndex=4 → anchor = own[4-3] = c1(종가110)
+    //   B: own array = [c0,c1,c2,c3,...]   → c3의 ownIndex=3 → anchor = own[3-3] = c0(종가100)
+    // A는 130/110-1 ≈ 18.2%, B는 130/100-1 = 30%로 서로 다른 수익률이 나와
+    // (틀렸는데도) B가 선택된다. 공통 캘린더 인덱스로 재면 둘 다 anchor가 c0로
+    // 같아져 130/100-1=30%로 동점이 되고, topK=1이면 동점 규칙(label 오름차순)에
+    // 따라 "A"가 선택되어야 한다 — 이 테스트는 그 결과를 고정한다.
+    const A: Candle[] = [
+      c("2023-11-01", 100, 100), // c0
+      c("2023-11-02", 100, 110), // c1
+      c("2023-11-03", 999, 999), // g — A에만 있는 결측 구간(개별 종목 이슈), 공통 캘린더에서 빠진다
+      c("2023-11-06", 100, 120), // c2
+      c("2023-11-07", 100, 130), // c3 = decideDate(11월 월말)
+      c("2023-12-01", 100, 100), // c4 = tradeDate(진입가)
+      c("2023-12-04", 100, 100), // c5 = 다음 후보(12월 월말, 미완결이라 값 무관)
+      c("2024-01-02", 100, 100), // c6 = c5의 tradeDate(청산가) — c5가 후보로 성립하려면 필요
+    ];
+    const B: Candle[] = [
+      c("2023-11-01", 100, 100), // c0 — A와 동일
+      c("2023-11-02", 100, 110), // c1 — A와 동일
+      // 2023-11-03 없음 — B는 결측 없이 정상 거래
+      c("2023-11-06", 100, 120), // c2 — A와 동일
+      c("2023-11-07", 100, 130), // c3 — A와 동일 (공유 구간에서 완전히 같은 가격 경로)
+      c("2023-12-01", 100, 100),
+      c("2023-12-04", 100, 100),
+      c("2024-01-02", 100, 100),
+    ];
+
+    const input: RotationInput = {
+      assets: [
+        { label: "A", candles: A },
+        { label: "B", candles: B },
+      ],
+      lookback: 3,
+      topK: 1,
+      roundTrip: 0,
+    };
+
+    const result = runRotation(input);
+
+    expect(result.rebalances).toHaveLength(1);
+    expect(result.rebalances[0].decideDate).toBe("2023-11-07");
+    // 공통 캘린더 기준이면 동점 → label 오름차순으로 "A"가 선택되어야 한다.
+    // (자기 인덱스 기준이던 옛 구현에서는 "B"가 선택되어 이 단언이 실패한다.)
+    expect(result.rebalances[0].held).toEqual(["A"]);
+  });
+});
+
 describe("runRotation — 비용은 실제로 바뀐 종목에만 붙는다", () => {
   // 4개 재조정 후보(각 달의 유일한 거래일이 곧 그 달의 월말) — 1·2번째는 A가
   // 계속 1위, 3번째는 B로 역전된다. 4번째(d4)는 3번째 기간의 청산 시점만
@@ -336,5 +392,31 @@ describe("runRotation — monthsHeldByAsset", () => {
 
     const sum = Object.values(result.monthsHeldByAsset).reduce((a, b) => a + b, 0);
     expect(sum).toBe(result.rebalances.length * input.topK);
+  });
+});
+
+describe("runRotation — 날짜 오름차순 계약", () => {
+  it("한 자산의 candles가 날짜 오름차순이 아니면 그 자산의 label을 담아 던진다", () => {
+    // 공통 캘린더 인덱스로 lookback anchor를 잡으므로, 순서가 뒤집힌 자산이
+    // 하나라도 있으면 그 자산의 date→캔들 매핑 자체는 맞아도 "정렬됐다"는
+    // 전제 위에서 계산되는 다른 로직(예: 향후 확장)이 조용히 틀어질 수 있다.
+    // 조용히 정렬해서 넘기지 않고, 어느 자산이 문제인지 바로 알 수 있게 던진다.
+    const outOfOrder: Candle[] = [
+      c("2024-01-03", 100, 100),
+      c("2024-01-02", 100, 100), // 앞의 날짜보다 이전 — 오름차순 위반
+    ];
+    const ok: Candle[] = [c("2024-01-02", 100, 100), c("2024-01-03", 100, 100)];
+
+    const input: RotationInput = {
+      assets: [
+        { label: "나쁜자산", candles: outOfOrder },
+        { label: "정상자산", candles: ok },
+      ],
+      lookback: 0,
+      topK: 1,
+      roundTrip: 0,
+    };
+
+    expect(() => runRotation(input)).toThrow("나쁜자산");
   });
 });
