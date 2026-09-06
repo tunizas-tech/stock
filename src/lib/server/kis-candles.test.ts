@@ -164,3 +164,82 @@ describe("getKisOverseasIndexCandles (해외지수)", () => {
     expect(headers.tr_id).toBe("FHKST03030100");
   });
 });
+
+describe("거래량·거래대금 매핑", () => {
+  it("국내지수 응답의 acml_vol·acml_tr_pbmn을 volume·value로 옮긴다", async () => {
+    stubFetch(() => ({
+      rt_cd: "0",
+      output2: [
+        {
+          stck_bsop_date: "20260904",
+          bstp_nmix_oprc: "6654.36",
+          bstp_nmix_hgpr: "6746.14",
+          bstp_nmix_lwpr: "6632.77",
+          bstp_nmix_prpr: "6687.21",
+          acml_vol: "238152",
+          acml_tr_pbmn: "17723650",
+        },
+      ],
+    }));
+
+    const out = await getKisIndexCandles("0001", "D", creds(), "20260904");
+
+    expect(out[0].volume).toBe(238152);
+    expect(out[0].value).toBe(17723650);
+  });
+
+  it("해외주식 응답의 tvol·tamt을 volume·value로 옮긴다 (해외주식은 거래대금도 제공한다)", async () => {
+    stubFetch(() => ({
+      rt_cd: "0",
+      output2: [
+        {
+          xymd: "20260904",
+          clos: "239.78",
+          sign: "2",
+          diff: "1.12",
+          rate: "0.47",
+          open: "238.90",
+          high: "240.50",
+          low: "238.10",
+          tvol: "39606884",
+          tamt: "12721413170",
+          pbid: "239.77",
+          vbid: "100",
+          pask: "239.79",
+          vask: "100",
+        },
+      ],
+    }));
+
+    const out = await getKisOverseasStockCandles("AAPL", "D", creds());
+
+    expect(out[0].volume).toBe(39606884);
+    expect(out[0].value).toBe(12721413170);
+  });
+
+  it("거래대금이 없는 해외지수 응답에서는 value가 undefined다", async () => {
+    stubFetch(() => ({
+      rt_cd: "0",
+      output2: [
+        {
+          stck_bsop_date: "20260904",
+          ovrs_nmix_oprc: "26587.90",
+          ovrs_nmix_hgpr: "26628.58",
+          ovrs_nmix_lwpr: "26444.84",
+          ovrs_nmix_prpr: "26506.99",
+          acml_vol: "6701009200",
+        },
+      ],
+    }));
+
+    const out = await getKisOverseasIndexCandles(
+      "COMP",
+      "D",
+      creds(),
+      "20260904"
+    );
+
+    expect(out[0].volume).toBe(6701009200);
+    expect(out[0].value).toBeUndefined();
+  });
+});

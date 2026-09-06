@@ -69,6 +69,8 @@ export interface Candle {
   high: number;
   low: number;
   close: number;
+  volume?: number; // 거래량 — 소스가 주지 않으면 undefined
+  value?: number; // 거래대금 — 국내만 제공
 }
 
 export interface Quote {
