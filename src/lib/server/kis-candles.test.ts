@@ -188,6 +188,35 @@ describe("거래량·거래대금 매핑", () => {
     expect(out[0].value).toBe(17723650);
   });
 
+  it("해외주식 응답의 tvol·tamt을 volume·value로 옮긴다 (해외주식은 거래대금도 제공한다)", async () => {
+    stubFetch(() => ({
+      rt_cd: "0",
+      output2: [
+        {
+          xymd: "20260904",
+          clos: "239.78",
+          sign: "2",
+          diff: "1.12",
+          rate: "0.47",
+          open: "238.90",
+          high: "240.50",
+          low: "238.10",
+          tvol: "39606884",
+          tamt: "12721413170",
+          pbid: "239.77",
+          vbid: "100",
+          pask: "239.79",
+          vask: "100",
+        },
+      ],
+    }));
+
+    const out = await getKisOverseasStockCandles("AAPL", "D", creds());
+
+    expect(out[0].volume).toBe(39606884);
+    expect(out[0].value).toBe(12721413170);
+  });
+
   it("거래대금이 없는 해외지수 응답에서는 value가 undefined다", async () => {
     stubFetch(() => ({
       rt_cd: "0",

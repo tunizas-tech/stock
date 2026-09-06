@@ -245,7 +245,9 @@ export async function getKisOverseasStockCandles(
         high: "high",
         low: "low",
         close: "clos",
-        volume: "acml_vol",
+        // 해외지수(HHDFS76240000 output2)와 달리 해외주식은 거래대금(tamt)도 준다.
+        volume: "tvol",
+        value: "tamt",
       });
     }
   }

@@ -47,5 +47,8 @@ export function applyHolidayMode(
       krDate: d.krDate,
       usDates: [d.usDates[d.usDates.length - 1]],
     }));
-  return nonEmpty;
+  if (mode === "sum") return nonEmpty;
+  // HolidayMode는 위 세 값뿐이므로 여기 도달하면 타입이 깨진 것이다.
+  const exhaustive: never = mode;
+  throw new Error(`알 수 없는 mode: ${exhaustive}`);
 }

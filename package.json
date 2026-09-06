@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "next lint --dir src --dir scripts",
     "test": "vitest run",
     "news:setup": "node --env-file-if-exists=.env.local scripts/news-setup.mjs",
     "backtest:fetch": "node --env-file-if-exists=.env.local scripts/backtest-fetch.mjs",

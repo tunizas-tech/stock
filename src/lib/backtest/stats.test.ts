@@ -31,14 +31,13 @@ describe("summarize", () => {
     expect(summarize([-0.1, -0.2]).payoff).toBeNaN();
   });
 
-  it("빈 입력이면 표본 0에 나머지는 0이다", () => {
-    expect(summarize([])).toEqual({
-      n: 0,
-      winRate: 0,
-      mean: 0,
-      payoff: 0,
-      mdd: 0,
-    });
+  it("빈 입력이면 표본 0에 payoff는 NaN(이익도 손실도 없음), 나머지는 0이다", () => {
+    const s = summarize([]);
+    expect(s.n).toBe(0);
+    expect(s.winRate).toBe(0);
+    expect(s.mean).toBe(0);
+    expect(s.payoff).toBeNaN();
+    expect(s.mdd).toBe(0);
   });
 });
 

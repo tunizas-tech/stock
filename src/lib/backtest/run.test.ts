@@ -105,4 +105,122 @@ describe("analyzeTransfer", () => {
     });
     expect(none.horizons).toEqual([]);
   });
+
+  describe("conditionalGross — 비용 전 조건부 성과", () => {
+    it("비용이 0이면 conditionalGross는 conditional과 같다", () => {
+      expect(report.conditionalGross.signal.mean).toBeCloseTo(
+        report.conditional.signal.mean,
+        10
+      );
+      expect(report.conditionalGross.control.mean).toBeCloseTo(
+        report.conditional.control.mean,
+        10
+      );
+    });
+
+    it("conditionalGross는 roundTrip과 무관하게 항상 같다", () => {
+      expect(withCost.conditionalGross.signal.mean).toBeCloseTo(
+        report.conditionalGross.signal.mean,
+        10
+      );
+      expect(withCost.conditionalGross.signal.winRate).toBeCloseTo(
+        report.conditionalGross.signal.winRate,
+        10
+      );
+      expect(withCost.conditionalGross.control.winRate).toBeCloseTo(
+        report.conditionalGross.control.winRate,
+        10
+      );
+    });
+
+    it("conditional과 conditionalGross는 표본을 동일하게 나눈다", () => {
+      expect(report.conditionalGross.signal.n).toBe(report.conditional.signal.n);
+      expect(report.conditionalGross.control.n).toBe(
+        report.conditional.control.n
+      );
+    });
+
+    it("비용이 있으면 conditional(비용후) 평균이 conditionalGross(비용전)보다 낮다", () => {
+      expect(withCost.conditional.signal.mean).toBeLessThan(
+        withCost.conditionalGross.signal.mean
+      );
+    });
+  });
+
+  describe("comparisonGross — 보유 기간별 비용 전 성과", () => {
+    it("보유 기간마다 comparisonGross를 낸다", () => {
+      for (let i = 0; i < report.horizons.length; i++) {
+        expect(report.horizons[i].comparisonGross.signal.n).toBeGreaterThan(0);
+        expect(report.horizons[i].comparisonGross.control.n).toBeGreaterThan(0);
+      }
+    });
+
+    it("comparisonGross는 roundTrip과 무관하게 항상 같다", () => {
+      for (let i = 0; i < report.horizons.length; i++) {
+        expect(withCost.horizons[i].comparisonGross.signal.mean).toBeCloseTo(
+          report.horizons[i].comparisonGross.signal.mean,
+          10
+        );
+      }
+    });
+
+    it("comparison과 comparisonGross는 표본을 동일하게 나눈다", () => {
+      for (let i = 0; i < report.horizons.length; i++) {
+        expect(report.horizons[i].comparisonGross.signal.n).toBe(
+          report.horizons[i].comparison.signal.n
+        );
+        expect(report.horizons[i].comparisonGross.control.n).toBe(
+          report.horizons[i].comparison.control.n
+        );
+      }
+    });
+  });
+});
+
+describe("analyzeTransfer — from 하한", () => {
+  const { kr, us } = build(60);
+  const base = analyzeTransfer({
+    krCandles: kr,
+    usCandles: us,
+    mode: "skip",
+    roundTrip: 0.004,
+    window: 20,
+    threshold: 0.01,
+    horizons: [3, 5],
+  });
+
+  it("from을 생략하면 전체 기간과 같은 결과를 낸다", () => {
+    const noFrom = analyzeTransfer({
+      krCandles: kr,
+      usCandles: us,
+      mode: "skip",
+      roundTrip: 0.004,
+      window: 20,
+      threshold: 0.01,
+      horizons: [3, 5],
+      from: undefined,
+    });
+    expect(noFrom).toEqual(base);
+  });
+
+  it("from을 주면 그 이전 한국 거래일은 빠지고 표본이 줄어든다", () => {
+    const filtered = analyzeTransfer({
+      krCandles: kr,
+      usCandles: us,
+      mode: "skip",
+      roundTrip: 0.004,
+      window: 20,
+      threshold: 0.01,
+      horizons: [3, 5],
+      from: "2020-08-03",
+    });
+
+    const totalBefore =
+      base.conditional.signal.n + base.conditional.control.n;
+    const totalAfter =
+      filtered.conditional.signal.n + filtered.conditional.control.n;
+    expect(totalAfter).toBeLessThan(totalBefore);
+    expect(filtered.rolling.length).toBeLessThan(base.rolling.length);
+    expect(filtered.rolling.every((p) => p.date >= "2020-08-03")).toBe(true);
+  });
 });
