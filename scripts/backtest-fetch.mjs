@@ -39,6 +39,24 @@ const SECTOR_ETFS = [
   { market: "US", code: "XLV", kind: "etf", label: "XLV", excd: "AMS", from: "20100101" },
 ];
 
+// 4단계: 섹터 로테이션 후보 7종 + 시장 벤치마크(KODEX 200). 전부 국내 ETF라
+// 2단계 SECTOR_ETFS의 국내 항목과 같은 모양(kind: "etf", market: "KR")을 그대로 쓴다.
+// from 은 위 SECTOR_ETFS와 같은 2010년 바닥선 — 2026-09-06 실호출로 모두
+// 2013년 이전 데이터가 있음을 확인했다(설계 문서 §1).
+// TIGER 반도체(091230)는 넣지 않는다 — 설계 문서 §1의 후보 표에 없고, 이미
+// SECTOR_ETFS에 있는 KODEX 반도체(091160)와 같은 섹터라 9개 후보 안에 반도체가
+// 둘이면 지난 13년 압도적이었던 반도체가 1위를 차지할 확률이 부자연스럽게
+// 커진다 — 회전 결과를 실제보다 좋아 보이게 만드는 오염이다.
+const ROTATION_ETFS = [
+  { market: "KR", code: "069500", kind: "etf", label: "KODEX 200", from: "20100101" },
+  { market: "KR", code: "091170", kind: "etf", label: "KODEX 은행", from: "20100101" },
+  { market: "KR", code: "091180", kind: "etf", label: "KODEX 자동차", from: "20100101" },
+  { market: "KR", code: "102960", kind: "etf", label: "KODEX 기계장비", from: "20100101" },
+  { market: "KR", code: "117460", kind: "etf", label: "KODEX 에너지화학", from: "20100101" },
+  { market: "KR", code: "117680", kind: "etf", label: "KODEX 철강", from: "20100101" },
+  { market: "KR", code: "140710", kind: "etf", label: "KODEX 운송", from: "20100101" },
+];
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ymd = (d) => d.toISOString().slice(0, 10).replaceAll("-", "");
 const iso = (s) => `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
@@ -280,5 +298,8 @@ for (const idx of INDICES) await loadTarget(token, idx);
 
 console.log("\n[3] 섹터 ETF 일봉 적재 (반도체/IT/헬스케어, 15년치)");
 for (const etf of SECTOR_ETFS) await loadTarget(token, etf);
+
+console.log("\n[4] 섹터 로테이션 후보 일봉 적재 (국내 ETF 7종 + KODEX 200, 15년치)");
+for (const etf of ROTATION_ETFS) await loadTarget(token, etf);
 
 console.log("\n완료. 다음: npm run backtest:run\n");
