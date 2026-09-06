@@ -146,7 +146,15 @@ type ChartRow = Record<string, string>;
 /** output2(최신순) → 오름차순 Candle[]. 필드명은 API마다 달라 매핑을 받는다. */
 function toCandles(
   rows: ChartRow[],
-  f: { date: string; open: string; high: string; low: string; close: string }
+  f: {
+    date: string;
+    open: string;
+    high: string;
+    low: string;
+    close: string;
+    volume?: string;
+    value?: string;
+  }
 ): Candle[] {
   return rows
     .filter((r) => r[f.date])
@@ -156,6 +164,8 @@ function toCandles(
       high: Number(r[f.high]),
       low: Number(r[f.low]),
       close: Number(r[f.close]),
+      volume: f.volume ? num(r[f.volume]) : undefined,
+      value: f.value ? num(r[f.value]) : undefined,
     }))
     .reverse();
 }
@@ -181,6 +191,8 @@ export async function getKisStockCandles(
     high: "stck_hgpr",
     low: "stck_lwpr",
     close: "stck_clpr",
+    volume: "acml_vol",
+    value: "acml_tr_pbmn",
   });
 }
 
@@ -205,6 +217,8 @@ export async function getKisIndexCandles(
     high: "bstp_nmix_hgpr",
     low: "bstp_nmix_lwpr",
     close: "bstp_nmix_prpr",
+    volume: "acml_vol",
+    value: "acml_tr_pbmn",
   });
 }
 
@@ -231,6 +245,7 @@ export async function getKisOverseasStockCandles(
         high: "high",
         low: "low",
         close: "clos",
+        volume: "acml_vol",
       });
     }
   }
@@ -258,6 +273,7 @@ export async function getKisOverseasIndexCandles(
     high: "ovrs_nmix_hgpr",
     low: "ovrs_nmix_lwpr",
     close: "ovrs_nmix_prpr",
+    volume: "acml_vol",
   });
 }
 

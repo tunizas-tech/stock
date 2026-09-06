@@ -164,3 +164,53 @@ describe("getKisOverseasIndexCandles (해외지수)", () => {
     expect(headers.tr_id).toBe("FHKST03030100");
   });
 });
+
+describe("거래량·거래대금 매핑", () => {
+  it("국내지수 응답의 acml_vol·acml_tr_pbmn을 volume·value로 옮긴다", async () => {
+    stubFetch(() => ({
+      rt_cd: "0",
+      output2: [
+        {
+          stck_bsop_date: "20260904",
+          bstp_nmix_oprc: "6654.36",
+          bstp_nmix_hgpr: "6746.14",
+          bstp_nmix_lwpr: "6632.77",
+          bstp_nmix_prpr: "6687.21",
+          acml_vol: "238152",
+          acml_tr_pbmn: "17723650",
+        },
+      ],
+    }));
+
+    const out = await getKisIndexCandles("0001", "D", creds(), "20260904");
+
+    expect(out[0].volume).toBe(238152);
+    expect(out[0].value).toBe(17723650);
+  });
+
+  it("거래대금이 없는 해외지수 응답에서는 value가 undefined다", async () => {
+    stubFetch(() => ({
+      rt_cd: "0",
+      output2: [
+        {
+          stck_bsop_date: "20260904",
+          ovrs_nmix_oprc: "26587.90",
+          ovrs_nmix_hgpr: "26628.58",
+          ovrs_nmix_lwpr: "26444.84",
+          ovrs_nmix_prpr: "26506.99",
+          acml_vol: "6701009200",
+        },
+      ],
+    }));
+
+    const out = await getKisOverseasIndexCandles(
+      "COMP",
+      "D",
+      creds(),
+      "20260904"
+    );
+
+    expect(out[0].volume).toBe(6701009200);
+    expect(out[0].value).toBeUndefined();
+  });
+});
