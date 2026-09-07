@@ -332,3 +332,110 @@ describe("stockTotals", () => {
     expect(total.tradingDays).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// until 옵션 — 스냅샷은 매매일 "전" 거래일 종가까지만 알아야 한다(설계 문서 C1:
+// 그날 마감 데이터가 스냅샷에 들어가면 look-ahead다). sectorTotals/stockTotals/
+// aggregateBySector에 후행 선택 인자를 추가해 "이 날짜까지만 본다"를 표현한다.
+// 생략하면 기존 동작과 완전히 같아야 한다 — 관측소 API(/api/observatory)는
+// until 없이 이 함수들을 호출하므로 하위 호환이 깨지면 그 라우트가 바로 영향받는다.
+// ---------------------------------------------------------------------------
+const untilFixture: StockFlow = {
+  ticker: "U1",
+  name: "유틸전자",
+  sector: "필터섹터",
+  days: [
+    { date: "2025-09-01", close: 1, foreign: 10, institution: 5, individual: -15, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+    { date: "2025-09-02", close: 1, foreign: 20, institution: 10, individual: -30, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+    // until 테스트 전용 — 이 거대한 흐름이 09-03(기준일 이후)에 있다.
+    // until을 걸었을 때 이 값이 섞이면 look-ahead가 재발했다는 뜻이다.
+    { date: "2025-09-03", close: 1, foreign: 1_000_000, institution: 1_000_000, individual: -2_000_000, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+  ],
+};
+
+describe("until 옵션 — 매매일 전 거래일까지만 집계(C1 가드)", () => {
+  it("sectorTotals: until 이후 날짜의 거대한 흐름이 합계에 섞이지 않는다", () => {
+    const [total] = sectorTotals([untilFixture], 10, "2025-09-02");
+    expect(total.foreign).toBe(10 + 20);
+    expect(total.institution).toBe(5 + 10);
+    expect(total.individual).toBe(-15 + -30);
+  });
+
+  it("sectorTotals: tradingDays는 until 이하 날짜만 센다", () => {
+    const [total] = sectorTotals([untilFixture], 10, "2025-09-02");
+    expect(total.tradingDays).toBe(2);
+  });
+
+  it("sectorTotals: until이 전체 데이터보다 이르면 크래시 없이 0으로 수렴한다", () => {
+    const [total] = sectorTotals([untilFixture], 10, "2025-08-01");
+    expect(total.tradingDays).toBe(0);
+    expect(total.foreign).toBe(0);
+    expect(total.institution).toBe(0);
+    expect(total.individual).toBe(0);
+    expect(total.other).toBe(0);
+    expect(total.otherRatio).toBe(0);
+    expect(total.unreliable).toBe(false);
+  });
+
+  it("sectorTotals: until을 생략하면 이전 동작과 동일하다(하위호환 고정)", () => {
+    const withoutUntil = sectorTotals([untilFixture], 10);
+    const withUntilAtLastDate = sectorTotals([untilFixture], 10, "2025-09-03");
+    expect(withUntilAtLastDate).toEqual(withoutUntil);
+  });
+
+  it("stockTotals: until 이후 날짜는 제외하고, 생략 시 기존과 동일하다", () => {
+    const [limited] = stockTotals([untilFixture], 10, "2025-09-02");
+    expect(limited.tradingDays).toBe(2);
+    expect(limited.foreign).toBe(30);
+
+    const withoutUntil = stockTotals([untilFixture], 10);
+    const withUntilAtLastDate = stockTotals([untilFixture], 10, "2025-09-03");
+    expect(withUntilAtLastDate).toEqual(withoutUntil);
+  });
+
+  it("aggregateBySector: until 이후 날짜는 결과 배열에 아예 나타나지 않는다", () => {
+    const out = aggregateBySector([untilFixture], "필터섹터", "2025-09-02");
+    expect(out.map((d) => d.date)).toEqual(["2025-09-01", "2025-09-02"]);
+  });
+
+  it("aggregateBySector: until이 전체 데이터보다 이르면 빈 배열을 반환한다", () => {
+    expect(aggregateBySector([untilFixture], "필터섹터", "2025-08-01")).toEqual([]);
+  });
+
+  it("aggregateBySector: until을 생략하면 이전 동작과 동일하다(하위호환 고정)", () => {
+    const withoutUntil = aggregateBySector([untilFixture], "필터섹터");
+    const withUntilAtLastDate = aggregateBySector([untilFixture], "필터섹터", "2025-09-03");
+    expect(withUntilAtLastDate).toEqual(withoutUntil);
+  });
+
+  // 1단계 태스크 2에서 미룬 항목(F) — "최근 days일"이 저장된 마지막 days개
+  // 날짜가 아니라 until 이하 날짜 중 최근 days개여야 한다는 걸 못박는다.
+  // 날짜 5개(09-01~09-05) 중 09-04·09-05는 until("2025-09-03") 이후이고,
+  // until 이하 날짜는 3개(09-01~09-03)라 days=2 < 3 조건을 만족한다 — 만약
+  // 구현이 "저장 배열의 마지막 days개"를 먼저 자르고 나서 until로 걸렀다면
+  // (필터 전 슬라이스), 09-04·09-05가 선택돼 버렸을 것이다. 09-04·09-05에는
+  // 눈에 띄게 큰 값을 심어 그 잘못이 섞이면 합계가 확 달라지게 한다.
+  const filterBeforeSliceFixture: StockFlow = {
+    ticker: "U2",
+    name: "유틸전자2",
+    sector: "필터섹터2",
+    days: [
+      { date: "2025-09-01", close: 1, foreign: 1, institution: 1, individual: -2, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+      { date: "2025-09-02", close: 1, foreign: 10, institution: 10, individual: -20, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+      { date: "2025-09-03", close: 1, foreign: 100, institution: 100, individual: -200, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+      // until("2025-09-03") 이후 — 걸러져야 한다. 저장 순서상으로는 "마지막
+      // days개"에 해당해 필터-후-슬라이스 순서가 깨지면 이 값이 새어 들어온다.
+      { date: "2025-09-04", close: 1, foreign: 1_000_000, institution: 1_000_000, individual: -2_000_000, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+      { date: "2025-09-05", close: 1, foreign: 10_000_000, institution: 10_000_000, individual: -20_000_000, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+    ],
+  };
+
+  it("sectorTotals: 저장된 마지막 days개가 아니라 until 이하 날짜 중 최근 days개를 고른다(필터 후 슬라이스 순서 고정)", () => {
+    const [total] = sectorTotals([filterBeforeSliceFixture], 2, "2025-09-03");
+    // until 이하(09-01~09-03) 중 최근 2개 = 09-02, 09-03. 09-04·09-05가
+    // 섞였다면 foreign은 수백만~천만 단위로 튀었을 것이다.
+    expect(total.foreign).toBe(10 + 100);
+    expect(total.institution).toBe(10 + 100);
+    expect(total.tradingDays).toBe(2);
+  });
+});

@@ -63,12 +63,15 @@ export interface SectorFlowDay {
  * 그 날짜에 기여했는지를 그대로 남긴다. 그래야 "섹터 전체가 보고한 것"과
  * "일부만 보고했는데 우연히 합계가 비슷해 보이는 것"을 구분할 수 있다.
  */
-export function aggregateBySector(flows: StockFlow[], sector: string): SectorFlowDay[] {
+export function aggregateBySector(flows: StockFlow[], sector: string, until?: string): SectorFlowDay[] {
   const bySector = flows.filter((f) => f.sector === sector);
 
   const byDate = new Map<string, { foreign: number; institution: number; individual: number; other: number; stocks: number }>();
   for (const stock of bySector) {
     for (const day of stock.days) {
+      // until(포함 상한)이 있으면 그 이후 날짜는 애초에 집계 대상에서 뺀다 — 매매일
+      // 당일·이후 종가가 스냅샷에 섞이는 look-ahead(C1)를 여기서 막는다.
+      if (until !== undefined && day.date > until) continue;
       const acc = byDate.get(day.date) ?? { foreign: 0, institution: 0, individual: 0, other: 0, stocks: 0 };
       acc.foreign += day.foreign;
       acc.institution += day.institution;
@@ -140,8 +143,13 @@ export interface SectorTotal {
  * 주는 초기 단계에서는 이 값이 요청한 `days`보다 작을 수 있고, 그 값 자체가
  * "이 숫자를 얼마나 믿어도 되는가"를 나타내는 신호다 — 호출자가 반드시
  * 함께 표시해야 한다.
+ *
+ * `until`(YYYY-MM-DD, 포함 상한)을 주면 그 날짜보다 뒤(초과)의 데이터는 아예
+ * 없는 셈 치고, "최근 `days`일"을 `until` 기준으로 거꾸로 센다 — 저장된
+ * 마지막 날짜부터가 아니다. 매매일지 스냅샷(설계 문서 C1)이 매매일 전
+ * 거래일까지만 봐야 하기 때문에 필요하다. 생략하면 이전과 완전히 같다.
  */
-export function sectorTotals(flows: StockFlow[], days: number): SectorTotal[] {
+export function sectorTotals(flows: StockFlow[], days: number, until?: string): SectorTotal[] {
   const sectors = [...new Set(flows.map((f) => f.sector))];
 
   const result = sectors.map((sector) => {
@@ -150,9 +158,14 @@ export function sectorTotals(flows: StockFlow[], days: number): SectorTotal[] {
     // 섹터에 속한 종목들의 날짜를 모두 모아 최근 `days`개만 남긴다.
     // (종목별로 보유한 날짜가 다를 수 있으므로 종목 단위가 아니라
     // "섹터가 관측한 고유 날짜" 단위로 최근 N일을 정의한다.)
+    // until이 있으면 그 이후 날짜는 애초에 후보에서 뺀다 — "최근 N일"의
+    // 기준점이 until이 되도록.
     const allDates = new Set<string>();
     for (const stock of bySector) {
-      for (const day of stock.days) allDates.add(day.date);
+      for (const day of stock.days) {
+        if (until !== undefined && day.date > until) continue;
+        allDates.add(day.date);
+      }
     }
     const recentDates = new Set([...allDates].sort((a, b) => b.localeCompare(a)).slice(0, days));
 
@@ -209,10 +222,16 @@ export interface StockTotal {
  *
  * foreign + institution 내림차순, 동률이면 ticker 오름차순으로 정렬해
  * 결과가 항상 결정적이도록 한다.
+ *
+ * `until`(YYYY-MM-DD, 포함 상한) 의미는 {@link sectorTotals}와 같다 — 그
+ * 날짜보다 뒤의 데이터는 없는 셈 치고, "최근 `days`일"을 거기서부터
+ * 거꾸로 센다. 생략하면 이전과 완전히 같다.
  */
-export function stockTotals(flows: StockFlow[], days: number): StockTotal[] {
+export function stockTotals(flows: StockFlow[], days: number, until?: string): StockTotal[] {
   const result = flows.map((stock) => {
-    const allDates = new Set(stock.days.map((d) => d.date));
+    const allDates = new Set(
+      stock.days.filter((d) => until === undefined || d.date <= until).map((d) => d.date)
+    );
     const recentDates = new Set([...allDates].sort((a, b) => b.localeCompare(a)).slice(0, days));
 
     let foreign = 0;

@@ -1,6 +1,7 @@
 "use client";
 
 // 매매일지(디자인 §4, PRD §6.1). 입력 폼 + 기록 카드 목록(최신순).
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { MarketBadge } from "@/components/MarketBadge";
@@ -19,12 +20,15 @@ const ACTION_LABEL: Record<JournalAction, string> = {
   buy: "매수",
   sell: "매도",
   note: "메모",
+  // skip = 검토했으나 매수하지 않음. 스냅샷은 같이 찍혀 "놓친 것"의 크기를 잰다 (스펙 §1, N3)
+  skip: "관망",
 };
 
 const ACTION_STYLE: Record<JournalAction, string> = {
   buy: "border-gain/40 text-gain",
   sell: "border-loss/40 text-loss",
   note: "border-line text-muted",
+  skip: "border-line text-muted",
 };
 
 export default function JournalPage() {
@@ -57,7 +61,11 @@ export default function JournalPage() {
 
   return (
     <div>
-      <PageHeader kicker="journal" title="매매일지" />
+      <PageHeader kicker="journal" title="매매일지">
+        <Link href="/journal/review" className="text-sm text-accent hover:underline">
+          자기검증 →
+        </Link>
+      </PageHeader>
 
       <div className="mb-6">
         <JournalEntryForm onSubmit={handleAdd} />
@@ -113,6 +121,11 @@ function JournalCard({
           >
             {ACTION_LABEL[entry.action]}
           </span>
+          {entry.primaryTag && (
+            <span className="inline-flex items-center rounded-md border border-line px-1.5 py-0.5 text-xs font-medium text-muted">
+              {entry.primaryTag}
+            </span>
+          )}
         </div>
         <button
           onClick={onDelete}
