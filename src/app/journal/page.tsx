@@ -40,6 +40,9 @@ export default function JournalPage() {
   const [mode, setMode] = useState<StorageMode>("local");
   const [localLeft, setLocalLeft] = useState<JournalEntry[]>([]);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  // 에이전트 기록 숨기기(8단계) — 사람 매매일지를 훑을 때 에이전트 관망이 섞여
+  // 보이지 않게 한다. localStorage에만 두는 순수 화면 설정이라 서버 값과 무관하다.
+  const [hideAgent, setHideAgent] = useState(false);
 
   async function refresh() {
     setEntries(await db.listJournal());
@@ -49,6 +52,24 @@ export default function JournalPage() {
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    try {
+      setHideAgent(localStorage.getItem("ssn.journal.hideAgent") === "1");
+    } catch {
+      /* 비공개 창 등 — 기본값(안 숨김) 유지 */
+    }
+  }, []);
+
+  function toggleHideAgent() {
+    const next = !hideAgent;
+    setHideAgent(next);
+    try {
+      localStorage.setItem("ssn.journal.hideAgent", next ? "1" : "0");
+    } catch {
+      /* 무시 — 이번 방문에서만 토글이 적용된다 */
+    }
+  }
 
   useEffect(() => {
     detectStorageMode().then((m) => {
@@ -84,12 +105,22 @@ export default function JournalPage() {
     await refresh();
   }
 
+  // 에이전트 기록이 하나도 없으면 토글 자체를 숨긴다 — 켜봐야 할 일이 없는
+  // 스위치를 항상 보여주면 "이게 뭐지"라는 질문만 남긴다.
+  const agentCount = entries.filter((e) => e.author === "agent").length;
+  const visible = hideAgent ? entries.filter((e) => e.author !== "agent") : entries;
+
   return (
     <div>
       <PageHeader kicker="journal" title="매매일지">
         <Link href="/journal/review" className="text-sm text-accent hover:underline">
           자기검증 →
         </Link>
+        {agentCount > 0 && (
+          <button onClick={toggleHideAgent} className="ml-4 text-xs text-muted hover:text-ink">
+            {hideAgent ? `에이전트 기록 보이기 (${agentCount})` : `에이전트 기록 숨기기 (${agentCount})`}
+          </button>
+        )}
       </PageHeader>
 
       {mode === "server" && localLeft.length > 0 && (
@@ -123,7 +154,7 @@ export default function JournalPage() {
         />
       ) : (
         <ul className="space-y-4">
-          {entries.map((e) => (
+          {visible.map((e) => (
             <JournalCard
               key={e.id}
               entry={e}
@@ -158,12 +189,22 @@ function JournalCard({
           <span className="tabular text-sm font-medium text-ink">
             {entry.ticker}
           </span>
-          <span className="text-sm text-muted">{entry.name}</span>
+          <span className="text-sm text-muted">
+            {entry.name}
+            {/* 섹터는 에이전트 기록에만 있다(수급 유니버스 밖 종목의 스냅샷 계산용) —
+                사람 기록에선 항상 undefined라 이 span은 자동으로 안 보인다. */}
+            {entry.sector && <span className="text-xs"> · {entry.sector}</span>}
+          </span>
           <span
             className={`tabular rounded-md border px-1.5 py-0.5 text-xs ${ACTION_STYLE[entry.action]}`}
           >
             {ACTION_LABEL[entry.action]}
           </span>
+          {entry.author === "agent" && (
+            <span className="inline-flex items-center rounded-md border border-accent/50 px-1.5 py-0.5 text-xs font-medium text-accent">
+              에이전트
+            </span>
+          )}
           {entry.primaryTag && (
             <span className="inline-flex items-center rounded-md border border-line px-1.5 py-0.5 text-xs font-medium text-muted">
               {entry.primaryTag}

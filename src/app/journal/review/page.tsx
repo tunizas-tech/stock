@@ -23,14 +23,8 @@ import {
   type JournalSettings,
 } from "@/lib/journal/settings";
 import { MIN_SAMPLE } from "@/lib/journal/review";
-import type { EmotionGroupStat, GroupStat } from "@/lib/journal/review";
+import type { EmotionGroupStat, GroupStat, SkipStat } from "@/lib/journal/review";
 import type { JournalEntry } from "@/lib/types";
-
-interface SkipStatShape {
-  n: number;
-  cfMean20?: number;
-  insufficient: boolean;
-}
 
 interface DisciplineShape {
   checked: number;
@@ -38,13 +32,16 @@ interface DisciplineShape {
   excessLoss: number;
 }
 
+// SkipStat은 review.ts(route가 실제로 계산하는 곳)에서 그대로 가져온다 — 여기서
+// 다시 손으로 선언하면 route가 필드를 바꿔도 컴파일이 통과해 런타임에만 깨진다
+// (Task 7 리뷰에서 실제로 그렇게 드러났다).
 interface ReviewResponse {
   closedCount: number;
   openCount: number;
   byEmotion: EmotionGroupStat[];
   byTag: GroupStat[];
   byHold: GroupStat[];
-  skip: SkipStatShape;
+  skip: { user: SkipStat; agent: SkipStat };
   discipline?: DisciplineShape;
   missingPrices: string[];
 }
@@ -383,6 +380,45 @@ function Stat({
   );
 }
 
+/**
+ * 관망 한 줄(사람/에이전트 공용). `n`(전체 관망 수)과 `pairedN`(KOSPI까지 짝지어져
+ * kospiMean20·delta의 분모가 된 수)는 서로 다른 모집단일 수 있다 — GroupTable의
+ * "대조 N"과 같은 이유로, n 옆에 작게 pairedN을 적어 그 차이를 표 밖으로 새지
+ * 않게 한다. KOSPI·차이 두 칸은 pairedN이 MIN_SAMPLE에 못 미치면 회색으로 둔다
+ * (숫자 자체는 지우지 않는다 — GroupTable의 cellClass와 같은 원칙).
+ */
+function SkipRow({ label, s }: { label: string; s: SkipStat }) {
+  const grey = s.insufficient;
+  const benchGrey = s.pairedN < MIN_SAMPLE;
+  const cls = (v: number | undefined, g: boolean) => (g || v === undefined ? "text-muted" : pnlClass(v));
+  return (
+    <div className="flex flex-wrap items-center gap-8 rounded-xl2 border border-line bg-surface p-4">
+      <p className={`w-24 text-sm font-medium ${grey ? "text-muted" : "text-ink"}`}>{label}</p>
+      <div>
+        <p className="text-xs text-muted">n</p>
+        <p className="tabular text-base font-semibold text-ink">
+          {s.n}
+          {s.pairedN < s.n && (
+            <span className="ml-1.5 text-[10px] font-normal text-muted">짝 {s.pairedN}</span>
+          )}
+          {grey && <InsufficientChip />}
+        </p>
+      </div>
+      <Stat
+        label="반사실 20일 평균"
+        value={fmtSignedRate(s.cfMean20)}
+        valueClass={cls(s.cfMean20, grey)}
+      />
+      <Stat
+        label="같은 창 KOSPI"
+        value={fmtSignedRate(s.kospiMean20)}
+        valueClass={cls(s.kospiMean20, benchGrey)}
+      />
+      <Stat label="차이" value={fmtSignedRate(s.delta)} valueClass={cls(s.delta, benchGrey)} />
+    </div>
+  );
+}
+
 function ReviewSections({ data }: { data: ReviewResponse }) {
   return (
     <div className="space-y-10">
@@ -418,15 +454,11 @@ function ReviewSections({ data }: { data: ReviewResponse }) {
 
       <ReviewSection
         title="관망(skip)"
-        caption="검토하고 안 산 종목의 평균이다. 이것이 없으면 판단력 자체는 잴 수 없다."
+        caption="검토하고 안 산 종목의 평균이다. 같은 날짜·같은 20일 창의 KOSPI를 옆에 둔다 — 시장이 더 올랐다면 그 관망은 잘한 것이 아니다. 에이전트 줄은 내 판단력과 섞지 않는다. KOSPI·차이는 두 값이 모두 계산된 관망(짝 n)끼리만 비교한 값이다."
       >
-        <div className="flex flex-wrap items-center gap-8 rounded-xl2 border border-line bg-surface p-4">
-          <Stat label="n" value={String(data.skip.n)} insufficient={data.skip.insufficient} />
-          <Stat
-            label="반사실 20일 평균"
-            value={fmtSignedRate(data.skip.cfMean20)}
-            valueClass={data.skip.cfMean20 !== undefined ? pnlClass(data.skip.cfMean20) : "text-muted"}
-          />
+        <div className="space-y-3">
+          <SkipRow label="내 관망" s={data.skip.user} />
+          <SkipRow label="에이전트 관망" s={data.skip.agent} />
         </div>
       </ReviewSection>
 
