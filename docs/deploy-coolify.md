@@ -6,16 +6,20 @@
 
 | 결정 | 선택 | 이유 |
 |---|---|---|
-| 매매일지 저장소 | **Supabase** | 코드가 이미 분기돼 있다(`src/lib/data.ts`). 환경변수 2개면 끝 |
+| 매매일지 저장소 | **Coolify Postgres** (`DATABASE_URL`, 뉴스와 공용. 없으면 브라우저 localStorage) | 7단계부터 매매일지는 서버 DB로 이동해 에이전트(Hermes)가 같은 문으로 쓸 수 있다 |
 | 인증 | **Basic Auth** (`src/middleware.ts`) | `APP_USER`/`APP_PASS` 두 개로 앱 전체가 잠긴다. 없으면 로컬처럼 열림 |
 | 데이터 위치 | **볼륨 `/app/data`** | `data/`는 gitignore. 재배포해도 남아야 한다 |
 
-## 1. Supabase 준비 (1회)
+## 1. Postgres 준비 (1회)
 
-1. 프로젝트 생성 → SQL Editor에서 `supabase/schema.sql` 실행
-2. Settings → API에서 **Project URL**과 **anon key** 복사
+Coolify에서 PostgreSQL 리소스 생성 → `db/news-schema.sql`, `db/journal-schema.sql`을 순서대로 1회 실행:
 
-anon key는 공개 가능한 값이라 `NEXT_PUBLIC_` 접두사가 붙는다. 서비스 키는 쓰지 않는다.
+```bash
+psql "$DATABASE_URL" -f db/news-schema.sql
+psql "$DATABASE_URL" -f db/journal-schema.sql
+```
+
+두 파일 모두 `create table if not exists`라 재배포·재실행해도 안전하다(멱등).
 
 ## 2. Coolify 애플리케이션 생성
 
@@ -33,11 +37,12 @@ anon key는 공개 가능한 값이라 `NEXT_PUBLIC_` 접두사가 붙는다. �
 | `APP_PASS` | **예** | 긴 비밀번호. 이게 없으면 관측소·매매일지가 인터넷에 열린다 |
 | `KIS_APP_KEY` | 예 | KIS 앱키 |
 | `KIS_APP_SECRET` | 예 | KIS 시크릿 |
-| `NEXT_PUBLIC_SUPABASE_URL` | 예 | 1번에서 복사 |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | 예 | 1번에서 복사 |
-| `DATABASE_URL` | 선택 | 뉴스 대시보드용 Postgres. 없으면 `/news`가 안내 문구만 보인다 |
+| `DATABASE_URL` | **예** | Coolify Postgres 연결 문자열. 뉴스·매매일지가 공용으로 쓴다. 없으면 매매일지는 브라우저 localStorage로 떨어지고 `/news`는 안내 문구만 보인다 |
+| `AGENT_TOKEN` | 선택 | 있으면 `POST /api/journal/agent`·뉴스·관측소를 Bearer로 열어 Hermes가 쓴다. `openssl rand -hex 32` |
 | `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | 선택 | 뉴스용 |
 | `FINNHUB_API_KEY` | 선택 | 미국 종목 시세 폴백 |
+
+보유·관심종목에 Supabase를 계속 쓰려면 `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`도 남길 수 있다(`supabase/schema.sql` 참고, 매매일지와는 무관).
 
 ### KIS 키에 대해
 
@@ -74,15 +79,20 @@ docker exec <container> sh -c 'cd /app && tar xzf data.tgz && rm data.tgz'
 
 ## 6. 예약 작업
 
-Scheduled Tasks에 세 개. 시간은 장 마감(15:30) 이후, 데이터가 확정된 뒤로 잡는다.
+Scheduled Tasks에 다섯 개. 저녁 세 개는 장 마감(15:30) 이후, 데이터가 확정된 뒤로 잡는다. 아침 두 개는
+Hermes가 관측소를 보기 전에 간밤 미국 세션을 받아 두기 위한 것이다.
 
 | 시간(KST) | 명령 | 소요 |
 |---|---|---|
+| 07:00 | `npm run backtest:fetch` | 1~2분 (증분) |
+| 07:30 | Hermes 아침 후보 검토 (→ `docs/hermes/AGENTS.md`) | 뉴스·후보 선정 |
 | 18:00 | `npm run flow:fetch` | 45초 |
 | 18:05 | `npm run backtest:fetch` | 1~2분 (증분) |
 | 18:10 | `curl -u "$APP_USER:$APP_PASS" -X POST http://localhost:3000/api/news/sync` | 뉴스 (선택) |
 
-셋째 줄에 `-u`가 있는 이유: 미들웨어가 API도 잠그므로 cron도 같은 문을 지나야 한다.
+07:00이 먼저인 이유: `backtest:fetch`가 나스닥·S&P 500·다우존스 지수도 받는다. 07:00에 미리 받아야
+07:30 관측소가 "전날" 미국 지수가 아니라 "간밤"에 마감한 진짜 최신 미국 지수를 보여준다. 마지막 줄에
+`-u`가 있는 이유: 미들웨어가 API도 잠그므로 cron도 같은 문을 지나야 한다.
 
 `flow:fetch`는 KIS의 30일 창을 병합하므로 **서버가 며칠 죽어도 다음 실행이 빈 날을 메운다.** 30일 넘게 멈추면 그때부터 손실이다.
 
@@ -101,6 +111,15 @@ curl -u user:pass https://<도메인>/observatory   # → 200
 
 첫 줄이 200이면 `APP_USER`/`APP_PASS`가 안 들어간 것이다. **그 상태로 두지 않는다.**
 
+`AGENT_TOKEN`을 넣었다면 에이전트 문도 확인한다:
+
+```bash
+curl -H "Authorization: Bearer $AGENT_TOKEN" -X POST https://<도메인>/api/journal/agent -d '{}'
+```
+
+**400**이어야 한다(본문이 비어 형식 검증에 걸린 것 — 문 자체는 열렸다는 뜻). 401이면 토큰이 틀렸다.
+503이면 `DATABASE_URL` 또는 `AGENT_TOKEN`이 서버에 안 들어갔다.
+
 관측소에 들어가 ② 섹터 자금 흐름의 "거래일" 열이 20일로 차 있으면 볼륨과 초기 데이터가 정상이다. "데이터 없음" 안내가 뜨면 5번을 확인한다.
 
 ## 매일 하는 일
@@ -115,4 +134,9 @@ curl -u user:pass https://<도메인>/observatory   # → 200
 
 ## 다음에 만들 것
 
-매매일지에 **그 순간의 관측소 상태를 같이 저장**하는 것. 그러면 반년 뒤 "확신도 5로 산 거래가 확신도 2보다 실제로 나았나"를 당신 데이터로 답할 수 있다. 시장 규칙은 여섯 번 검증해 전부 기각됐지만, **당신의 매매 습관은 검증 가능하고 그것이 실제로 수익을 바꾼다.**
+6단계 자기검증(완료) · 7단계 에이전트 관망(완료). 매매일지가 그 순간의 관측소 상태를 같이 저장하고,
+Hermes가 매일 아침 남긴 "관망"이 180일 뒤 KOSPI와 비교된다. 시장 규칙은 여섯 번 검증해 전부 기각됐지만,
+**당신의 매매 습관은 검증 가능하고 그것이 실제로 수익을 바꾼다.**
+
+다음 후보: **보유·관심종목 Postgres 이전 + Supabase 제거.** 매매일지는 이미 옮겼으니, 남은 두 테이블마저
+옮기면 이 문서의 §1이 "Postgres 준비" 하나로 끝나고 `supabase/schema.sql`을 통째로 지울 수 있다.

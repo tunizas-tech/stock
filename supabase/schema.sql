@@ -21,6 +21,9 @@ create table if not exists watchlist (
   "addedAt" date not null
 );
 
+-- 7단계부터 매매일지는 `db/journal-schema.sql`(Coolify Postgres)로 이동.
+-- 아래 journal 정의는 Supabase를 계속 쓰는 보유·관심종목과 무관하며
+-- 참고용으로만 남긴다.
 create table if not exists journal (
   id        uuid primary key default gen_random_uuid(),
   date      date not null,
