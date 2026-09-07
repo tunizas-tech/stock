@@ -27,10 +27,21 @@ type Draft = Omit<JournalEntry, "id">;
 const inputClass =
   "w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-accent";
 
-// ReasonTag(7종 고정, types.ts) — review.ts는 이 목록을 내부 전용으로만 쓰고
+// ReasonTag(types.ts) — review.ts는 이 목록을 내부 전용으로만 쓰고
 // export하지 않는다(주 이유별 묶음 계산에만 쓰면 되기 때문). 화면에 필요한
 // 선택지는 같은 타입에서 여기 따로 든다.
-const REASON_TAGS: ReasonTag[] = ["수급", "지표", "섹터강세", "미국장", "뉴스", "밸류체인", "직관"];
+// "에이전트"(7단계)도 사람 폼에 노출한다 — 에이전트가 제안한 종목을 사용자가
+// 실제로 사면 그 근거를 그대로 주 이유로 남길 수 있어야 한다.
+const REASON_TAGS: ReasonTag[] = [
+  "수급",
+  "지표",
+  "섹터강세",
+  "미국장",
+  "뉴스",
+  "밸류체인",
+  "직관",
+  "에이전트",
+];
 
 export function JournalEntryForm({
   onSubmit,
