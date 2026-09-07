@@ -110,7 +110,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   const byEmotion = groupByEmotion(closed, priceLookup, REVIEW_SEED, DEFAULT_ROUND_TRIP);
   const byTag = groupByPrimaryTag(closed, priceLookup, REVIEW_SEED, DEFAULT_ROUND_TRIP);
   const byHold = groupByHoldBucket(closed, priceLookup, REVIEW_SEED, DEFAULT_ROUND_TRIP);
-  const skip = skipCounterfactual(entries, priceLookup, DEFAULT_ROUND_TRIP);
+  // 관망 반사실을 시장(KOSPI, 티커 0001)과 나란히 둔다 — priceLookup을 그대로
+  // 쓰면 안전한 티커 검증(isSafeTicker)을 또 거쳐야 하니, candleCloses를 직접
+  // 부른다("0001"은 항상 안전한 상수라 검증이 필요 없다).
+  const kospi = candleCloses("0001");
+  const skip = skipCounterfactual(entries, priceLookup, DEFAULT_ROUND_TRIP, kospi);
   const discipline = disciplineReport(closed, priceLookup, settings.stopLossPct, DEFAULT_ROUND_TRIP);
 
   return NextResponse.json({

@@ -84,6 +84,15 @@ describe("sealBaseDate — 봉인 기준일은 거래일이 아니라 기록 시
   it("형식이 깨진 createdAt은 기준일로 쓰지 않는다", () => {
     expect(sealBaseDate([{ createdAt: "어제" }])).toBeUndefined();
   });
+
+  it("sealBaseDate는 에이전트 기록을 무시한다", () => {
+    expect(sealBaseDate([{ createdAt: "2026-01-01T00:00:00.000Z", author: "agent" }])).toBeUndefined();
+    expect(sealBaseDate([
+      { createdAt: "2026-01-01T00:00:00.000Z", author: "agent" },
+      { createdAt: "2026-03-01T00:00:00.000Z", author: "user" },
+      { createdAt: "2026-02-01T00:00:00.000Z" },
+    ])).toBe("2026-02-01");
+  });
 });
 
 describe("isSealed — 경계값(179일째 봉인, 180일째 해제), createdAt 기준", () => {

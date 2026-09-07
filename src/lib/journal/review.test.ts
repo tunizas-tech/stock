@@ -4,6 +4,7 @@ import { DEFAULT_ROUND_TRIP } from "../backtest/cost";
 import {
   DECLARED_PROB,
   disciplineReport,
+  entersSameDay,
   forwardReturn,
   groupByEmotion,
   groupByHoldBucket,
@@ -233,11 +234,14 @@ describe("groupByEmotion / groupByPrimaryTag / groupByHoldBucket", () => {
     }
   });
 
-  it("주 이유 그룹은 7개 태그 + '없음' 8개 키를 전부 반환한다", () => {
+  it("주 이유 그룹은 8개 태그(에이전트 포함) + '없음' 9개 키를 전부 반환한다", () => {
     const stats = groupByPrimaryTag([], priceLookup, 1, 0);
-    expect(stats).toHaveLength(8);
+    expect(stats).toHaveLength(9);
     expect(stats.map((s) => s.key)).toContain("없음");
     expect(stats.map((s) => s.key)).toContain("수급");
+    // R5: validate.ts의 REASON_TAGS(8종, "에이전트" 포함)를 그대로 쓴다 —
+    // 로컬에 따로 7종짜리 배열을 두면 에이전트 문 거래가 이 표에서 빠진다.
+    expect(stats.map((s) => s.key)).toContain("에이전트");
   });
 
   it("보유기간 그룹은 4개 버킷을 전부 반환한다", () => {
@@ -276,14 +280,82 @@ describe("skipCounterfactual — N3", () => {
     ];
     const entries: JournalEntry[] = [entry({ action: "skip", date: "2025-01-01", ticker: "X" })];
     const result = skipCounterfactual(entries, (t) => (t === "X" ? closes : undefined), 0);
-    expect(result.n).toBe(1);
-    expect(result.cfMean20).toBeDefined();
+    expect(result.user.n).toBe(1);
+    expect(result.user.cfMean20).toBeDefined();
   });
 
   it("skip 데이터가 없으면 n=0, insufficient=true, cfMean20 undefined", () => {
     const result = skipCounterfactual([], () => undefined, 0);
-    expect(result).toEqual({ n: 0, cfMean20: undefined, insufficient: true });
+    expect(result.user).toEqual({ n: 0, cfMean20: undefined, insufficient: true });
     expect(MIN_SAMPLE).toBe(20);
+  });
+});
+
+describe("forwardReturn includeSameDay", () => {
+  const closes = [
+    { date: "2026-09-07", close: 100 }, { date: "2026-09-08", close: 110 }, { date: "2026-09-09", close: 121 },
+  ];
+  it("기본은 다음 거래일 진입(> fromDate)", () => {
+    expect(forwardReturn(closes, "2026-09-07", 1, 0)).toBeCloseTo(0.1, 6);       // 110→121
+  });
+  it("includeSameDay면 그날 종가 진입(>= fromDate)", () => {
+    expect(forwardReturn(closes, "2026-09-08", 1, 0, true)).toBeCloseTo(0.1, 6);  // 110→121
+    expect(forwardReturn(closes, "2026-09-08", 1, 0)).toBeUndefined();            // 121 다음이 없다
+  });
+});
+
+describe("entersSameDay", () => {
+  it("07:30 KST 기록은 그날 종가 진입", () => {
+    expect(entersSameDay({ date: "2026-09-08", createdAt: "2026-09-07T22:30:00.000Z" })).toBe(true);
+  });
+  it("16:00 KST 기록은 다음 거래일", () => {
+    expect(entersSameDay({ date: "2026-09-08", createdAt: "2026-09-08T07:00:00.000Z" })).toBe(false);
+  });
+  it("createdAt 없으면 종전대로 다음 거래일", () => {
+    expect(entersSameDay({ date: "2026-09-08" })).toBe(false);
+  });
+});
+
+describe("skipCounterfactual — author 분리·KOSPI 대조", () => {
+  const closes = Array.from({ length: 30 }, (_, i) => ({ date: `2026-01-${String(i + 1).padStart(2, "0")}`, close: 100 + i }));
+  const kospi = Array.from({ length: 30 }, (_, i) => ({ date: `2026-01-${String(i + 1).padStart(2, "0")}`, close: 1000 + i * 5 }));
+  const skip = (p: Partial<JournalEntry>): JournalEntry => ({ id: Math.random().toString(36), date: "2026-01-02", market: "KR", ticker: "X", name: "x", action: "skip", reason: "", emotion: 3, lesson: "", ...p });
+  it("사람과 에이전트를 나눠 세고, 같은 창의 KOSPI 수익과 차이를 붙인다", () => {
+    const r = skipCounterfactual([skip({ author: "agent" }), skip({}), skip({ author: "user" })], () => closes, 0, kospi);
+    expect(r.agent.n).toBe(1);
+    expect(r.user.n).toBe(2);
+    // 진입 01-03(다음 거래일) close 102 → +20일 01-23 close 122: +19.6%; KOSPI 1010→1110: +9.9%
+    expect(r.user.cfMean20).toBeCloseTo(122 / 102 - 1, 6);
+    expect(r.user.kospiMean20).toBeCloseTo(1110 / 1010 - 1, 6);
+    expect(r.user.delta).toBeCloseTo(122 / 102 - 1 - (1110 / 1010 - 1), 6);
+  });
+  it("07:30 에이전트 기록은 그날 종가 진입으로 판다", () => {
+    const r = skipCounterfactual([skip({ author: "agent", date: "2026-01-02", createdAt: "2026-01-01T22:30:00.000Z" })], () => closes, 0, kospi);
+    // 진입 01-02 close 101 → 01-22 close 121
+    expect(r.agent.cfMean20).toBeCloseTo(121 / 101 - 1, 6);
+    expect(r.agent.kospiMean20).toBeCloseTo(1105 / 1005 - 1, 6);
+  });
+  it("KOSPI 종가가 없으면 kospiMean20·delta는 undefined, cfMean20은 그대로", () => {
+    const r = skipCounterfactual([skip({})], () => closes, 0, undefined);
+    expect(r.user.cfMean20).toBeDefined();
+    expect(r.user.kospiMean20).toBeUndefined();
+    expect(r.user.delta).toBeUndefined();
+  });
+});
+
+describe("computeGroupStat cfMean20도 createdAt 규칙을 따른다", () => {
+  it("07:30에 쓴 매수는 반사실이 그날 종가부터", () => {
+    // 30일 closes, 매수 01-02 07:30 KST createdAt, 매도 01-10. cfMean20 = closes[1]→closes[21]
+    const closes = Array.from({ length: 30 }, (_, i) => ({ date: `2026-01-${String(i + 1).padStart(2, "0")}`, close: 100 + i }));
+    const entries: JournalEntry[] = [
+      { id: "b", date: "2026-01-02", market: "KR", ticker: "X", name: "x", action: "buy", price: 101, qty: 1, reason: "", emotion: 3, lesson: "", createdAt: "2026-01-01T22:30:00.000Z" },
+      { id: "s", date: "2026-01-10", market: "KR", ticker: "X", name: "x", action: "sell", price: 109, qty: 1, reason: "", emotion: 3, lesson: "" },
+    ];
+    const { closed } = pairTrades(entries, 0);
+    expect(closed[0].entryCreatedAt).toBe("2026-01-01T22:30:00.000Z");
+    // 없는 확신도 행들 사이에서 3번 행을 찾는다
+    const e3 = groupByEmotion(closed, () => closes, 1, 0).find((r) => r.key === "3")!;
+    expect(e3.cfMean20).toBeCloseTo(121 / 101 - 1, 6);
   });
 });
 

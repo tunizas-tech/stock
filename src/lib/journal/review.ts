@@ -8,6 +8,8 @@
 
 import type { Emotion, JournalEntry, JournalSnapshot, ReasonTag } from "../types";
 import { applyCost } from "../backtest/cost";
+import { isAfterCloseKst } from "../kst";
+import { REASON_TAGS } from "./validate";
 
 // ---------------------------------------------------------------------------
 // mulberry32 — backtest/benchmark.ts와 같은 패턴을 그대로 복사한다(import 아님).
@@ -38,6 +40,8 @@ export interface ClosedTrade {
   ticker: string;
   name: string;
   entryDate: string;
+  /** 진입 매수를 실제로 "쓴" 시각(ISO) — entersSameDay로 그날 종가 진입 여부를 가른다. */
+  entryCreatedAt?: string;
   exitDate: string;
   /** 달력일 차이 — 매매일지 날짜는 거래일이 아니라 달력일이라 그대로 뺀다. */
   holdDays: number;
@@ -119,6 +123,8 @@ export function pairTrades(
     let qty = 0;
     let avgCost = 0;
     let since: string | undefined;
+    // since와 항상 같이 세팅/리셋된다 — 같은 진입에 물린 buy가 남긴 createdAt.
+    let sinceCreatedAt: string | undefined;
     let name = sorted[0].name;
     // "가장 최근 매수"의 감정·주 이유·스냅샷 — 매도 시 이 값을 그대로 물려준다.
     let lastBuy: BuyAttribution | undefined;
@@ -128,7 +134,10 @@ export function pairTrades(
       const p = e.price as number;
 
       if (e.action === "buy") {
-        if (qty === 0) since = e.date; // 포지션이 없던 상태에서의 매수 = 새 진입
+        if (qty === 0) {
+          since = e.date; // 포지션이 없던 상태에서의 매수 = 새 진입
+          sinceCreatedAt = e.createdAt;
+        }
         avgCost = (avgCost * qty + p * q) / (qty + q);
         qty += q;
         name = e.name;
@@ -144,6 +153,7 @@ export function pairTrades(
       // qty > 0인 상태에서만 이 분기에 도달하므로 반드시 이전에 매수가 있었고,
       // since·lastBuy는 항상 정의돼 있다.
       const entryDate = since as string;
+      const entryCreatedAt = sinceCreatedAt;
       const attribution = lastBuy as BuyAttribution;
       const grossReturn = p / avgCost - 1;
 
@@ -151,6 +161,7 @@ export function pairTrades(
         ticker,
         name,
         entryDate,
+        entryCreatedAt,
         exitDate: e.date,
         holdDays: calendarDays(entryDate, e.date),
         avgCost,
@@ -164,7 +175,10 @@ export function pairTrades(
       });
 
       qty -= closeQty;
-      if (qty === 0) since = undefined;
+      if (qty === 0) {
+        since = undefined;
+        sinceCreatedAt = undefined;
+      }
     }
 
     if (qty > 0) {
@@ -192,19 +206,32 @@ export function pairTrades(
 /**
  * `fromDate` "다음" 거래일 종가에 진입해 `horizonDays` 거래일 뒤 종가에 청산.
  * `closes`는 날짜 오름차순을 가정한다(Candle 배열 관례와 동일).
+ *
+ * `includeSameDay`가 true면 `fromDate` 그날 종가부터 진입한다(설계 §5) — 장
+ * 마감 전에 쓴 기록은 그날 종가를 아직 모르므로 미리보기가 아니다.
  */
 export function forwardReturn(
   closes: { date: string; close: number }[],
   fromDate: string,
   horizonDays: number,
-  roundTrip: number
+  roundTrip: number,
+  includeSameDay = false
 ): number | undefined {
-  const entryIdx = closes.findIndex((c) => c.date > fromDate);
+  const entryIdx = closes.findIndex((c) => (includeSameDay ? c.date >= fromDate : c.date > fromDate));
   if (entryIdx < 0) return undefined;
   const exitIdx = entryIdx + horizonDays;
   if (exitIdx >= closes.length) return undefined;
   const gross = closes[exitIdx].close / closes[entryIdx].close - 1;
   return applyCost(gross, roundTrip);
+}
+
+/**
+ * createdAt이 그 거래일(date)의 장 마감(15:30 KST) 전이면 그날 종가 진입으로
+ * 본다(설계 §5) — 마감 전에 쓴 기록은 그날 종가를 아직 모르므로 미리보기가
+ * 아니다. createdAt이 없으면(옛 기록) 종전대로 다음 거래일.
+ */
+export function entersSameDay(e: { date: string; createdAt?: string }): boolean {
+  return e.createdAt !== undefined && !isAfterCloseKst(e.createdAt, e.date);
 }
 
 // ---------------------------------------------------------------------------
@@ -346,7 +373,13 @@ function computeGroupStat(
       }
     }
 
-    const cf = forwardReturn(prices, t.entryDate, COUNTERFACTUAL_HORIZON_DAYS, roundTrip);
+    const cf = forwardReturn(
+      prices,
+      t.entryDate,
+      COUNTERFACTUAL_HORIZON_DAYS,
+      roundTrip,
+      entersSameDay({ date: t.entryDate, createdAt: t.entryCreatedAt })
+    );
     if (cf !== undefined) cfMeans.push(cf);
   }
 
@@ -385,10 +418,13 @@ export function groupByEmotion(
   });
 }
 
-const REASON_TAGS: ReasonTag[] = ["수급", "지표", "섹터강세", "미국장", "뉴스", "밸류체인", "직관"];
 const NO_TAG = "없음";
 
-/** 주 이유별(7종 + "없음") 묶음. */
+/**
+ * 주 이유별(8종 + "없음") 묶음. 태그 목록은 validate.ts의 REASON_TAGS를 그대로
+ * 쓴다(R5) — 이걸 로컬에서 따로 유지하면 7단계에서 추가된 "에이전트" 태그가
+ * 이 표에서 조용히 빠진다.
+ */
 export function groupByPrimaryTag(
   closed: ClosedTrade[],
   priceLookup: PriceLookup,
@@ -424,25 +460,55 @@ export function groupByHoldBucket(
   });
 }
 
+export interface SkipStat {
+  n: number;
+  cfMean20?: number;
+  kospiMean20?: number;
+  delta?: number;
+  insufficient: boolean;
+}
+
 /**
- * `skip`(검토했지만 안 산) 건의 20거래일 반사실 평균 — "놓친 것"의 크기(N3).
- * 실제 거래가 아니므로 대조군(randomMean)·delta는 정의하지 않는다.
+ * 관망의 20거래일 반사실 — 사람/에이전트로 나눈다(섞으면 "내 판단력"에 에이전트
+ * 점수가 들어간다). 같은 진입일·같은 창의 KOSPI 수익을 나란히 둔다: 뉴스로 알게
+ * 된 종목은 이미 오른 종목이기 쉬워, 시장과 비교하지 않으면 "+3%"가 좋은지 나쁜지
+ * 알 수 없다. delta는 둘 다 계산된 관망끼리만 뺀다.
  */
 export function skipCounterfactual(
   entries: JournalEntry[],
   priceLookup: PriceLookup,
-  roundTrip: number
-): { n: number; cfMean20?: number; insufficient: boolean } {
-  const cfs: number[] = [];
+  roundTrip: number,
+  kospiCloses?: { date: string; close: number }[]
+): { user: SkipStat; agent: SkipStat } {
+  const acc = {
+    user: { cf: [] as number[], pairs: [] as [number, number][] },
+    agent: { cf: [] as number[], pairs: [] as [number, number][] },
+  };
   for (const e of entries) {
     if (e.action !== "skip") continue;
     const prices = priceLookup(e.ticker);
     if (prices === undefined) continue;
-    const cf = forwardReturn(prices, e.date, COUNTERFACTUAL_HORIZON_DAYS, roundTrip);
-    if (cf !== undefined) cfs.push(cf);
+    const sameDay = entersSameDay(e);
+    const cf = forwardReturn(prices, e.date, COUNTERFACTUAL_HORIZON_DAYS, roundTrip, sameDay);
+    if (cf === undefined) continue;
+    const bucket = e.author === "agent" ? acc.agent : acc.user;
+    bucket.cf.push(cf);
+    const k = kospiCloses
+      ? forwardReturn(kospiCloses, e.date, COUNTERFACTUAL_HORIZON_DAYS, roundTrip, sameDay)
+      : undefined;
+    if (k !== undefined) bucket.pairs.push([cf, k]);
   }
-  const n = cfs.length;
-  return { n, cfMean20: n > 0 ? avg(cfs) : undefined, insufficient: n < MIN_SAMPLE };
+  const stat = (b: typeof acc.user): SkipStat => {
+    const n = b.cf.length;
+    const s: SkipStat = { n, insufficient: n < MIN_SAMPLE };
+    if (n > 0) s.cfMean20 = avg(b.cf);
+    if (b.pairs.length > 0) {
+      s.kospiMean20 = avg(b.pairs.map((p) => p[1]));
+      s.delta = avg(b.pairs.map((p) => p[0])) - s.kospiMean20;
+    }
+    return s;
+  };
+  return { user: stat(acc.user), agent: stat(acc.agent) };
 }
 
 // ---------------------------------------------------------------------------
