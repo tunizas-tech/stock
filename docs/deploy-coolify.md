@@ -21,6 +21,28 @@ psql "$DATABASE_URL" -f db/journal-schema.sql
 
 두 파일 모두 `create table if not exists`라 재배포·재실행해도 안전하다(멱등).
 
+```bash
+psql "$DATABASE_URL" -c '\d journal'   # 17개 컬럼이 보이면 성공
+```
+
+**스키마를 앱 재배포보다 먼저 적용한다.** 순서를 뒤집으면 새 이미지가 없는 테이블을
+읽어 `/journal`이 "서버에서 기록을 불러오지 못했습니다" 한 줄만 보여준다(기록은
+아무것도 잃지 않는다 — 스키마를 넣고 새로고침하면 그대로 돌아온다).
+
+### Supabase에 매매일지 기록이 있었다면 — 재배포 **전에** 꺼낸다
+
+7단계부터 앱은 Supabase의 `journal` 테이블을 **더 이상 읽지 않는다.** 데이터는
+Supabase에 그대로 남아 있지만 화면에서는 사라지고, **자동 이관 경로는 없다.**
+재배포 전에 Supabase SQL Editor에서 아래를 돌려 결과를 CSV로 내려받아 보관한다:
+
+```sql
+select * from journal order by date;
+```
+
+필요하면 그 CSV를 보고 Coolify Postgres의 `journal` 테이블에 손으로 넣는다.
+(브라우저 localStorage에 있던 기록만 `/journal`의 "서버로 올리기" 카드로 1회
+이관된다 — 이건 Supabase와 무관한 별개 경로다.)
+
 ## 2. Coolify 애플리케이션 생성
 
 - Source: `tunizas-tech/stock`, branch `main`
@@ -42,7 +64,7 @@ psql "$DATABASE_URL" -f db/journal-schema.sql
 | `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | 선택 | 뉴스용 |
 | `FINNHUB_API_KEY` | 선택 | 미국 종목 시세 폴백 |
 
-보유·관심종목에 Supabase를 계속 쓰려면 `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`도 남길 수 있다(`supabase/schema.sql` 참고, 매매일지와는 무관).
+보유·관심종목에 Supabase를 계속 쓰려면 `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`도 남길 수 있다(`supabase/schema.sql` 참고). **매매일지는 7단계부터 Supabase를 읽지 않는다** — 거기 있던 일지 기록은 이 배포 후 화면에서 사라진다(데이터는 Supabase에 남는다). 옮기려면 위 §1의 추출 절차를 재배포 **전에** 밟는다.
 
 ### KIS 키에 대해
 
@@ -119,6 +141,21 @@ curl -H "Authorization: Bearer $AGENT_TOKEN" -X POST https://<도메인>/api/jou
 
 **400**이어야 한다(본문이 비어 형식 검증에 걸린 것 — 문 자체는 열렸다는 뜻). 401이면 토큰이 틀렸다.
 503이면 `DATABASE_URL` 또는 `AGENT_TOKEN`이 서버에 안 들어갔다.
+
+매매일지까지 한 번에 확인하려면 세 줄을 순서대로:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://<도메인>/observatory            # → 401
+curl -s -u "$APP_USER:$APP_PASS" https://<도메인>/api/journal | head -c 200      # → {"entries":[...]}
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $AGENT_TOKEN" -X POST \
+  https://<도메인>/api/journal/agent -d '{}'                                      # → 400
+```
+
+첫 07:00 실행 뒤 로그에 `[5] 일지 종목 일봉 적재 / 대상 N종목`이 보여야 한다.
+`DATABASE_URL 없음, 건너뜀`이면 스크립트 쪽 환경변수가 빠진 것이고,
+`경고: 일지 종목 적재 건너뜀 — …`이면 스키마가 아직 안 들어간 것이다(이 단계는
+선택이라 나머지 19종 적재와 스크립트 종료 코드에는 영향을 주지 않는다).
 
 관측소에 들어가 ② 섹터 자금 흐름의 "거래일" 열이 20일로 차 있으면 볼륨과 초기 데이터가 정상이다. "데이터 없음" 안내가 뜨면 5번을 확인한다.
 
