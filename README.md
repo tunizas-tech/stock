@@ -39,13 +39,13 @@ Coolify에 올리는 절차는 [docs/deploy-coolify.md](./docs/deploy-coolify.md
 
 `.env.local.example`를 `.env.local`로 복사해 값을 채우면:
 
-- **Supabase** 키 → localStorage 대신 Postgres 영속 저장 (`supabase/schema.sql` 실행 필요)
+- **`DATABASE_URL`**(Coolify Postgres) → localStorage 대신 서버 저장. `db/news-schema.sql`·`db/journal-schema.sql`·`db/portfolio-schema.sql`을 순서대로 1회 적용
 - **KIS/Finnhub** 키 → 모듈 A 시세 연동 (서버 전용, `NEXT_PUBLIC_` 금지)
 
 ## 아키텍처 요약
 
 - `lib/types.ts` — 도메인 타입 단일 출처
-- `lib/data.ts` — 저장소 파사드(Supabase ↔ localStorage 자동 분기). 페이지는 `db.*`만 호출
+- `lib/data.ts` — 저장소 파사드(서버 API ↔ localStorage 런타임 분기). 페이지는 `db.*`만 호출
 - `lib/quotes.ts` — 시세 어댑터. `/api/quotes` 호출, 실패 시 mock 폴백
 - `lib/server/{kis,finnhub}.ts` — 시세 프로바이더(서버 전용, `npm test`로 검증)
 - `lib/format.ts` — 통화·퍼센트·날짜·손익 색상

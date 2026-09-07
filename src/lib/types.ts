@@ -1,5 +1,5 @@
 // 도메인 타입 단일 출처. 모든 레이어(페이지·데이터·시세·DB 스키마)가 이 타입을 공유한다.
-// Supabase 스키마(supabase/schema.sql)의 컬럼명도 이 타입과 일치(camelCase 컬럼은 따옴표).
+// db/*.sql의 컬럼명도 이 타입과 일치(camelCase 컬럼은 따옴표).
 
 export type Market = "KR" | "US";
 
