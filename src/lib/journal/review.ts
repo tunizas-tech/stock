@@ -87,7 +87,20 @@ export function pairTrades(
   const byTicker = new Map<string, JournalEntry[]>();
   for (const e of entries) {
     if (e.action !== "buy" && e.action !== "sell") continue;
-    if (e.price === undefined || e.qty === undefined) continue;
+    // 값이 "있는지"가 아니라 "쓸 수 있는지"를 본다. 옛 기록·손상된 저장소에서
+    // price가 null이나 문자열로 들어오면 undefined 검사만으로는 통과해 버리고,
+    // 그 뒤 평균단가 계산이 NaN이 되어 그 종목의 모든 거래(그리고 그 거래가
+    // 속한 묶음 평균 전체)가 NaN으로 오염된다 — 한 줄의 나쁜 값이 화면 전체를
+    // 망치지 않도록 여기서 걸러낸다. qty<=0도 같은 이유다(0주 매수는 평균단가
+    // 계산을 0으로 나눈다).
+    if (
+      typeof e.price !== "number" ||
+      typeof e.qty !== "number" ||
+      !Number.isFinite(e.price) ||
+      !Number.isFinite(e.qty) ||
+      e.qty <= 0
+    )
+      continue;
     const arr = byTicker.get(e.ticker) ?? [];
     arr.push(e);
     byTicker.set(e.ticker, arr);
@@ -241,11 +254,18 @@ export const DECLARED_PROB: Record<1 | 2 | 3 | 4 | 5, number> = {
 
 export interface GroupStat {
   key: string;
+  /** 이 묶음의 전체 거래 수 — mean·winRate의 모집단(스펙 §3 "모든 칸에 표본 수"). */
   n: number;
+  /**
+   * 그중 로컬에 시세가 있어 대조군·반사실을 계산할 수 있었던 거래 수.
+   * `delta`의 모집단이다 — n과 다르면 화면이 그 사실을 같이 보여준다.
+   */
+  priceN: number;
   insufficient: boolean;
   mean?: number;
   winRate?: number;
   randomMean?: number;
+  /** (시세 있는 거래들의 평균) − randomMean. 같은 모집단끼리의 차이다. */
   delta?: number;
   cfMean20?: number;
 }
@@ -256,6 +276,18 @@ export interface EmotionGroupStat extends GroupStat {
 
 const RANDOM_BENCHMARK_COUNT = 20;
 const COUNTERFACTUAL_HORIZON_DAYS = 20;
+
+/**
+ * 종가 배열에서 이 날짜의 인덱스. 그날 거래가 없었으면(주말·휴장) 그 다음
+ * 거래일 인덱스를 준다. 배열 끝을 넘으면 undefined.
+ */
+function tradingDayIndex(
+  closes: { date: string; close: number }[],
+  date: string
+): number | undefined {
+  const i = closes.findIndex((c) => c.date >= date);
+  return i < 0 ? undefined : i;
+}
 
 /**
  * 한 묶음의 통계를 낸다. n=0이어도 키는 그대로 반환한다 — 표본이 없다는 사실
@@ -269,27 +301,59 @@ function computeGroupStat(
   roundTrip: number
 ): GroupStat {
   const n = trades.length;
-  if (n === 0) return { key, n: 0, insufficient: true };
+  if (n === 0) return { key, n: 0, priceN: 0, insufficient: true };
 
   const netReturns = trades.map((t) => t.netReturn);
   const mean = avg(netReturns);
   const winRate = netReturns.filter((r) => r > 0).length / n;
 
+  // 시세를 찾은 거래의 수익만 따로 모은다 — 대조군(randomMean)은 이 거래들에서만
+  // 나오므로, 전체 평균(mean)에서 빼면 서로 다른 모집단을 뺀 수치가 된다.
+  // "무작위보다 나았다"가 사실은 "시세 없는 종목이 잘됐다"일 수 있다는 뜻이다.
+  const pricedReturns: number[] = [];
   const randomMeans: number[] = [];
   const cfMeans: number[] = [];
   for (const t of trades) {
     const prices = priceLookup(t.ticker);
     if (prices === undefined) continue;
-    const rb = randomBenchmark(prices, t.holdDays, RANDOM_BENCHMARK_COUNT, seed, roundTrip);
-    if (rb !== undefined) randomMeans.push(rb);
+    pricedReturns.push(t.netReturn);
+
+    // 대조군 보유일은 **거래일** 차이다. randomBenchmark는 종가 배열의 인덱스를
+    // 그대로 더하므로 달력일(t.holdDays)을 넘기면 주말만큼 더 긴 기간과 비교하게
+    // 된다(금→화 매매는 달력 4일이지만 거래일로는 2일이다). ClosedTrade.holdDays와
+    // 보유기간 묶음은 달력일 그대로 둔다 — 사용자는 달력으로 생각하기 때문이고,
+    // 그래서 이 두 숫자는 의도적으로 다르다.
+    const entryIdx = tradingDayIndex(prices, t.entryDate);
+    const exitIdx = tradingDayIndex(prices, t.exitDate);
+    const tradingHold =
+      entryIdx !== undefined && exitIdx !== undefined ? exitIdx - entryIdx : 0;
+    // 0 이하면 이 종가 배열로는 보유 구간을 못 잡는다(시세가 매매일 이후에만
+    // 있는 경우 등) — 0일짜리 무작위 진입은 비용만 빼는 무의미한 값이라 뺀다.
+    if (tradingHold > 0) {
+      const rb = randomBenchmark(prices, tradingHold, RANDOM_BENCHMARK_COUNT, seed, roundTrip);
+      if (rb !== undefined) randomMeans.push(rb);
+    }
+
     const cf = forwardReturn(prices, t.entryDate, COUNTERFACTUAL_HORIZON_DAYS, roundTrip);
     if (cf !== undefined) cfMeans.push(cf);
   }
-  const randomMean = randomMeans.length > 0 ? avg(randomMeans) : undefined;
-  const cfMean20 = cfMeans.length > 0 ? avg(cfMeans) : undefined;
-  const delta = randomMean !== undefined ? mean - randomMean : undefined;
 
-  return { key, n, insufficient: n < MIN_SAMPLE, mean, winRate, randomMean, delta, cfMean20 };
+  const priceN = pricedReturns.length;
+  const randomMean = priceN > 0 && randomMeans.length > 0 ? avg(randomMeans) : undefined;
+  const cfMean20 = priceN > 0 && cfMeans.length > 0 ? avg(cfMeans) : undefined;
+  const delta = randomMean !== undefined ? avg(pricedReturns) - randomMean : undefined;
+
+  return {
+    key,
+    n,
+    priceN,
+    insufficient: n < MIN_SAMPLE,
+    mean,
+    winRate,
+    randomMean,
+    delta,
+    cfMean20,
+  };
 }
 
 /** 확신도별(1~5) 묶음. 거래가 0건인 등급도 키는 항상 낸다. */
@@ -400,14 +464,22 @@ export function disciplineReport(
     checked += 1;
 
     const stopPrice = t.avgCost * (1 - stopLossPct);
+    // 이탈 창은 [매수일, 매도일) — **매도 당일은 뺀다**. 손절선을 깬 그날 팔았다면
+    // 그건 규칙을 지킨 모습이지 어긴 게 아니다. 창을 매도일까지로 잡으면 규칙대로
+    // 판 사람이 오히려 위반으로 잡힌다.
     const breached = prices.some(
-      (p) => p.date >= t.entryDate && p.date <= t.exitDate && p.close < stopPrice
+      (p) => p.date >= t.entryDate && p.date < t.exitDate && p.close < stopPrice
     );
-    const lostMoreThanStop = t.netReturn < -stopLossPct;
 
-    if (breached && lostMoreThanStop) {
+    if (breached) {
+      // 위반은 이탈만으로 센다. "이탈했는데 안 팔았다"가 곧 규율 위반이고,
+      // 그 뒤 운 좋게 회복해 손실이 작았는지는 규율과 무관하다 — 결과로 규율을
+      // 채점하면 "버텨서 이긴" 거래가 규율 위반에서 빠져나간다.
       violated += 1;
-      excessLoss += t.netReturn - -stopLossPct;
+      // 초과 손실은 손절선보다 **더 잃은 몫**만 센다. 회복해서 덜 잃었으면
+      // 0이다(양수로 더해 "규율을 어겨 이득"이라고 적지 않는다).
+      const excess = t.netReturn + stopLossPct;
+      if (excess < 0) excessLoss += excess;
     }
   }
 

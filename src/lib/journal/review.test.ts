@@ -12,6 +12,7 @@ import {
   pairTrades,
   randomBenchmark,
   skipCounterfactual,
+  type PriceLookup,
 } from "./review";
 
 const RT = DEFAULT_ROUND_TRIP;
@@ -29,6 +30,38 @@ function entry(partial: Partial<JournalEntry>): JournalEntry {
     lesson: "",
     ...partial,
   };
+}
+
+/**
+ * 달력일 연속 종가 픽스처(2025-01-01 형식). 거래일=달력일인 단순 시리즈라
+ * "진입/청산 날짜가 배열에서 그대로 찾아진다".
+ */
+function closesFrom(start: string, n: number, drift: number): { date: string; close: number }[] {
+  const out: { date: string; close: number }[] = [];
+  const d = new Date(`${start}T00:00:00Z`);
+  let close = 100;
+  for (let i = 0; i < n; i++) {
+    close *= 1 + drift;
+    out.push({ date: d.toISOString().slice(0, 10), close });
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return out;
+}
+
+/** 주말을 건너뛴 종가 픽스처 — 달력일과 거래일이 어긋나게 만드는 데 쓴다(I-2). */
+function tradingCloses(start: string, n: number, drift: number): { date: string; close: number }[] {
+  const out: { date: string; close: number }[] = [];
+  const d = new Date(`${start}T00:00:00Z`);
+  let close = 100;
+  while (out.length < n) {
+    const dow = d.getUTCDay();
+    if (dow !== 0 && dow !== 6) {
+      close *= 1 + drift;
+      out.push({ date: d.toISOString().slice(0, 10), close });
+    }
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return out;
 }
 
 describe("pairTrades — 평균단가 짝짓기", () => {
@@ -224,16 +257,10 @@ describe("groupByEmotion / groupByPrimaryTag / groupByHoldBucket", () => {
   });
 
   it("delta = mean - randomMean", () => {
-    function series(n: number): { date: string; close: number }[] {
-      const out = [];
-      let close = 100;
-      for (let i = 0; i < n; i++) {
-        close *= 1.002;
-        out.push({ date: `2025-02-${String((i % 27) + 1).padStart(2, "0")}`, close });
-      }
-      return out;
-    }
-    const prices = series(80);
+    // 픽스처 날짜는 실제 달력 순서여야 한다 — I-2 이후 대조군 보유일이 종가
+    // 배열에서 찾은 거래일 인덱스 차이라, 날짜가 뒤죽박죽이면 진입/청산
+    // 인덱스를 못 잡아 그 거래가 대조군에서 빠진다.
+    const prices = closesFrom("2025-01-01", 80, 0.002);
     const trades = Array.from({ length: 20 }, () => mkClosed({ emotion: 1 }));
     const stats = groupByEmotion(trades, () => prices, 5, 0).find((s) => s.key === "1")!;
     expect(stats.randomMean).toBeDefined();
@@ -303,5 +330,178 @@ describe("disciplineReport — I3", () => {
     const report = disciplineReport([trade], () => prices, 0.1, 0);
     expect(report!.violated).toBe(0);
     expect(report!.excessLoss).toBe(0);
+  });
+});
+
+
+describe("delta 모집단 — 시세가 있는 거래끼리만 비교한다(I-1)", () => {
+  // 왜 이 구분이 필요한가: mean은 전체 거래의 평균인데 randomMean은 시세를 찾은
+  // 거래에서만 나온다. 그 둘을 그냥 빼면 "무작위보다 나았다"가 사실은 "시세
+  // 없는 종목이 잘됐다"일 수 있다 — 서로 다른 모집단을 뺀 수치라 의미가 없다.
+  const prices = closesFrom("2025-01-01", 60, 0.002);
+  const lookup: PriceLookup = (t) => (t === "P" ? prices : undefined);
+
+  function trade(ticker: string, sellPrice: number) {
+    const entries: JournalEntry[] = [
+      entry({ ticker, action: "buy", date: "2025-01-02", price: 100, qty: 10, emotion: 4 }),
+      entry({ ticker, action: "sell", date: "2025-01-08", price: sellPrice, qty: 10 }),
+    ];
+    return pairTrades(entries, 0).closed[0];
+  }
+
+  it("n은 전체 거래 수, priceN은 시세를 찾은 거래 수", () => {
+    const trades = [trade("P", 110), trade("X", 200), trade("Y", 50)];
+    const stat = groupByEmotion(trades, lookup, 5, 0).find((s) => s.key === "4")!;
+    expect(stat.n).toBe(3);
+    expect(stat.priceN).toBe(1);
+  });
+
+  it("delta는 시세 있는 거래(1건)의 평균 기준이고, 전체 평균 기준이 아니다", () => {
+    const trades = [trade("P", 110), trade("X", 200), trade("Y", 50)];
+    const stat = groupByEmotion(trades, lookup, 5, 0).find((s) => s.key === "4")!;
+    expect(stat.randomMean).toBeDefined();
+    // 시세 있는 거래는 P 하나 — 그 거래의 수익(+10%)만으로 비교한다.
+    expect(stat.delta).toBeCloseTo(0.1 - stat.randomMean!, 10);
+    // 전체 평균(mean)은 -20%대라 그걸로 뺐다면 완전히 다른 값이 나온다.
+    expect(stat.mean).not.toBeCloseTo(0.1, 3);
+    expect(stat.delta).not.toBeCloseTo(stat.mean! - stat.randomMean!, 3);
+  });
+
+  it("mean·winRate는 스펙대로 전체 n 기준을 유지한다", () => {
+    const trades = [trade("P", 110), trade("X", 200), trade("Y", 50)];
+    const stat = groupByEmotion(trades, lookup, 5, 0).find((s) => s.key === "4")!;
+    expect(stat.mean).toBeCloseTo((0.1 + 1.0 - 0.5) / 3, 10);
+    expect(stat.winRate).toBeCloseTo(2 / 3, 10);
+  });
+
+  it("시세를 찾은 거래가 하나도 없으면 randomMean·delta·cfMean20 모두 undefined", () => {
+    const trades = [trade("X", 200), trade("Y", 50)];
+    const stat = groupByEmotion(trades, lookup, 5, 0).find((s) => s.key === "4")!;
+    expect(stat.priceN).toBe(0);
+    expect(stat.randomMean).toBeUndefined();
+    expect(stat.delta).toBeUndefined();
+    expect(stat.cfMean20).toBeUndefined();
+    expect(stat.mean).toBeDefined(); // 실제 수익은 일지 자체 값이라 그대로 남는다
+  });
+});
+
+describe("대조군 보유일은 거래일 기준(I-2)", () => {
+  // 종가 배열은 거래일만 담는다 — randomBenchmark는 그 배열의 인덱스를 그대로
+  // 더하므로, 달력일(금→화 = 4일)을 넘기면 실제로는 4거래일(= 달력 6일)짜리
+  // 대조군이 되어 사용자 거래보다 긴 기간과 비교하게 된다.
+  const prices = tradingCloses("2025-01-01", 60, 0.002);
+
+  function fridayToTuesday() {
+    const entries: JournalEntry[] = [
+      // 2025-01-03(금) 매수 → 2025-01-07(화) 매도. 달력 4일, 거래일 2일.
+      entry({ ticker: "P", action: "buy", date: "2025-01-03", price: 100, qty: 10, emotion: 2 }),
+      entry({ ticker: "P", action: "sell", date: "2025-01-07", price: 110, qty: 10 }),
+    ];
+    return pairTrades(entries, 0).closed[0];
+  }
+
+  it("금→화 보유는 holdDays(달력) 4이지만 대조군은 거래일 2로 돈다", () => {
+    const t = fridayToTuesday();
+    expect(t.holdDays).toBe(4); // 달력일은 그대로 둔다(사용자는 달력으로 생각한다)
+
+    const stat = groupByEmotion([t], () => prices, 5, 0).find((s) => s.key === "2")!;
+    const expected = randomBenchmark(prices, 2, 20, 5, 0);
+    const calendarBased = randomBenchmark(prices, 4, 20, 5, 0);
+    expect(expected).not.toBeCloseTo(calendarBased!, 6); // 픽스처가 두 값을 구분한다
+    expect(stat.randomMean).toBeCloseTo(expected!, 12);
+  });
+
+  it("종가 배열에서 진입·청산이 같은 거래일로 잡히면 그 거래는 대조군에서 빠진다", () => {
+    // 종가 배열이 매매일보다 나중에 시작하면 진입·청산 모두 첫 인덱스로 잡힌다
+    // → 보유일 0. 0일짜리 무작위 진입은 비용만 빼는 무의미한 수치라 제외한다.
+    const later = closesFrom("2025-06-01", 60, 0.002);
+    const t = fridayToTuesday();
+    const stat = groupByEmotion([t], () => later, 5, 0).find((s) => s.key === "2")!;
+    expect(stat.priceN).toBe(1); // 시세 자체는 찾았다
+    expect(stat.randomMean).toBeUndefined();
+    expect(stat.delta).toBeUndefined();
+  });
+});
+
+describe("pairTrades — 값이 이상한 기록 방어(I-3)", () => {
+  it("price가 null인 매수는 무시하고 나머지로 정상 청산한다(NaN 오염 없음)", () => {
+    const entries: JournalEntry[] = [
+      entry({ ticker: "N", action: "buy", date: "2025-01-01", price: null as unknown as number, qty: 10 }),
+      entry({ ticker: "N", action: "buy", date: "2025-01-02", price: 100, qty: 10 }),
+      entry({ ticker: "N", action: "sell", date: "2025-01-05", price: 110, qty: 10 }),
+    ];
+    const { closed, open } = pairTrades(entries, 0);
+    expect(closed).toHaveLength(1);
+    expect(closed[0].avgCost).toBe(100);
+    expect(Number.isNaN(closed[0].netReturn)).toBe(false);
+    expect(closed[0].netReturn).toBeCloseTo(0.1, 10);
+    expect(closed[0].entryDate).toBe("2025-01-02");
+    expect(open).toHaveLength(0);
+  });
+
+  it("qty가 0·음수·NaN인 기록도 포지션을 흔들지 않는다", () => {
+    const entries: JournalEntry[] = [
+      entry({ ticker: "N", action: "buy", date: "2025-01-01", price: 100, qty: 0 }),
+      entry({ ticker: "N", action: "buy", date: "2025-01-02", price: 100, qty: -5 }),
+      entry({ ticker: "N", action: "buy", date: "2025-01-03", price: 100, qty: NaN }),
+      entry({ ticker: "N", action: "buy", date: "2025-01-04", price: 100, qty: 10 }),
+      entry({ ticker: "N", action: "sell", date: "2025-01-06", price: 120, qty: 10 }),
+    ];
+    const { closed, open } = pairTrades(entries, 0);
+    expect(closed).toHaveLength(1);
+    expect(closed[0].avgCost).toBe(100);
+    expect(closed[0].netReturn).toBeCloseTo(0.2, 10);
+    expect(open).toHaveLength(0);
+  });
+});
+
+describe("disciplineReport — 이탈 창과 초과 손실의 정의(I-5)", () => {
+  function closedTrade(entryDate: string, exitDate: string, avgCost: number, netReturn: number) {
+    const entries: JournalEntry[] = [
+      entry({ ticker: "D", action: "buy", date: entryDate, price: avgCost, qty: 10 }),
+      entry({ ticker: "D", action: "sell", date: exitDate, price: avgCost * (1 + netReturn), qty: 10 }),
+    ];
+    return pairTrades(entries, 0).closed[0];
+  }
+
+  it("이탈 후 회복해 손절선보다 작은 손실로 팔아도 위반이다(초과 손실은 0)", () => {
+    // 손절 5%: 종가가 94까지 빠져 규칙상 팔았어야 했는데 안 팔았다 → 규율 위반.
+    // 결국 -2%로 끝나 "손해는 덜 봤다" — 그래도 규칙을 어긴 건 어긴 것이다.
+    // 초과 손실은 손절선보다 더 잃은 몫만 세므로 여기서는 0이다.
+    const trade = closedTrade("2025-01-01", "2025-01-10", 100, -0.02);
+    const prices = [
+      { date: "2025-01-01", close: 100 },
+      { date: "2025-01-05", close: 94 }, // 손절선(95) 이탈
+      { date: "2025-01-10", close: 98 },
+    ];
+    const report = disciplineReport([trade], () => prices, 0.05, 0)!;
+    expect(report.violated).toBe(1);
+    expect(report.excessLoss).toBe(0);
+  });
+
+  it("매도 당일 종가가 처음 이탈한 것이면 위반이 아니다(규칙대로 판 것)", () => {
+    // 손절선을 깬 그날 팔았다면 그게 바로 규칙을 지킨 모습이다.
+    const trade = closedTrade("2025-01-01", "2025-01-10", 100, -0.06);
+    const prices = [
+      { date: "2025-01-01", close: 100 },
+      { date: "2025-01-05", close: 97 },
+      { date: "2025-01-10", close: 94 }, // 매도 당일에 처음 이탈
+    ];
+    const report = disciplineReport([trade], () => prices, 0.05, 0)!;
+    expect(report.checked).toBe(1);
+    expect(report.violated).toBe(0);
+    expect(report.excessLoss).toBe(0);
+  });
+
+  it("이탈했고 손절선보다 더 잃었으면 그 초과분만 합산한다", () => {
+    const trade = closedTrade("2025-01-01", "2025-01-10", 100, -0.2);
+    const prices = [
+      { date: "2025-01-01", close: 100 },
+      { date: "2025-01-05", close: 85 },
+      { date: "2025-01-10", close: 80 },
+    ];
+    const report = disciplineReport([trade], () => prices, 0.1, 0)!;
+    expect(report.violated).toBe(1);
+    expect(report.excessLoss).toBeCloseTo(-0.1, 10);
   });
 });
