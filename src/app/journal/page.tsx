@@ -19,12 +19,15 @@ const ACTION_LABEL: Record<JournalAction, string> = {
   buy: "매수",
   sell: "매도",
   note: "메모",
+  // skip = 검토했으나 매수하지 않음. 스냅샷은 같이 찍혀 "놓친 것"의 크기를 잰다 (스펙 §1, N3)
+  skip: "관망",
 };
 
 const ACTION_STYLE: Record<JournalAction, string> = {
   buy: "border-gain/40 text-gain",
   sell: "border-loss/40 text-loss",
   note: "border-line text-muted",
+  skip: "border-line text-muted",
 };
 
 export default function JournalPage() {
