@@ -256,7 +256,7 @@ describe("groupByEmotion / groupByPrimaryTag / groupByHoldBucket", () => {
     expect(s19.mean).toBeDefined();
   });
 
-  it("delta = mean - randomMean", () => {
+  it("모든 거래에 시세가 있으면 delta = mean − randomMean", () => {
     // 픽스처 날짜는 실제 달력 순서여야 한다 — I-2 이후 대조군 보유일이 종가
     // 배열에서 찾은 거래일 인덱스 차이라, 날짜가 뒤죽박죽이면 진입/청산
     // 인덱스를 못 잡아 그 거래가 대조군에서 빠진다.
@@ -334,10 +334,11 @@ describe("disciplineReport — I3", () => {
 });
 
 
-describe("delta 모집단 — 시세가 있는 거래끼리만 비교한다(I-1)", () => {
-  // 왜 이 구분이 필요한가: mean은 전체 거래의 평균인데 randomMean은 시세를 찾은
-  // 거래에서만 나온다. 그 둘을 그냥 빼면 "무작위보다 나았다"가 사실은 "시세
-  // 없는 종목이 잘됐다"일 수 있다 — 서로 다른 모집단을 뺀 수치라 의미가 없다.
+describe("delta 모집단 — 대조군이 돈 거래끼리만 비교한다(I-1)", () => {
+  // 왜 이 구분이 필요한가: mean은 전체 거래의 평균인데 randomMean은 대조군을
+  // 실제로 돌린 거래에서만 나온다. 그 둘을 그냥 빼면 "무작위보다 나았다"가
+  // 사실은 "대조군이 없던 종목이 잘됐다"일 수 있다 — 서로 다른 모집단을 뺀
+  // 수치라 의미가 없다. priceN은 그 "대조군이 돈 거래" 수다.
   const prices = closesFrom("2025-01-01", 60, 0.002);
   const lookup: PriceLookup = (t) => (t === "P" ? prices : undefined);
 
@@ -349,18 +350,18 @@ describe("delta 모집단 — 시세가 있는 거래끼리만 비교한다(I-1)
     return pairTrades(entries, 0).closed[0];
   }
 
-  it("n은 전체 거래 수, priceN은 시세를 찾은 거래 수", () => {
+  it("n은 전체 거래 수, priceN은 대조군이 돈 거래 수", () => {
     const trades = [trade("P", 110), trade("X", 200), trade("Y", 50)];
     const stat = groupByEmotion(trades, lookup, 5, 0).find((s) => s.key === "4")!;
     expect(stat.n).toBe(3);
     expect(stat.priceN).toBe(1);
   });
 
-  it("delta는 시세 있는 거래(1건)의 평균 기준이고, 전체 평균 기준이 아니다", () => {
+  it("delta는 대조군이 돈 거래(1건)의 평균 기준이고, 전체 평균 기준이 아니다", () => {
     const trades = [trade("P", 110), trade("X", 200), trade("Y", 50)];
     const stat = groupByEmotion(trades, lookup, 5, 0).find((s) => s.key === "4")!;
     expect(stat.randomMean).toBeDefined();
-    // 시세 있는 거래는 P 하나 — 그 거래의 수익(+10%)만으로 비교한다.
+    // 대조군이 돈 거래는 P 하나 — 그 거래의 수익(+10%)만으로 비교한다.
     expect(stat.delta).toBeCloseTo(0.1 - stat.randomMean!, 10);
     // 전체 평균(mean)은 -20%대라 그걸로 뺐다면 완전히 다른 값이 나온다.
     expect(stat.mean).not.toBeCloseTo(0.1, 3);
@@ -374,7 +375,7 @@ describe("delta 모집단 — 시세가 있는 거래끼리만 비교한다(I-1)
     expect(stat.winRate).toBeCloseTo(2 / 3, 10);
   });
 
-  it("시세를 찾은 거래가 하나도 없으면 randomMean·delta·cfMean20 모두 undefined", () => {
+  it("대조군이 하나도 못 돌면 randomMean·delta·cfMean20 모두 undefined", () => {
     const trades = [trade("X", 200), trade("Y", 50)];
     const stat = groupByEmotion(trades, lookup, 5, 0).find((s) => s.key === "4")!;
     expect(stat.priceN).toBe(0);
@@ -382,6 +383,27 @@ describe("delta 모집단 — 시세가 있는 거래끼리만 비교한다(I-1)
     expect(stat.delta).toBeUndefined();
     expect(stat.cfMean20).toBeUndefined();
     expect(stat.mean).toBeDefined(); // 실제 수익은 일지 자체 값이라 그대로 남는다
+  });
+
+  it("시세는 있지만 대조군을 못 돌린 거래(당일 매매)는 priceN에도 delta에도 안 들어간다", () => {
+    // 당일 사고 판 거래는 보유 거래일이 0이라 대조군을 돌릴 수 없다. 그런데도
+    // 분자(수익 평균)에만 넣으면 delta는 다시 "대조군이 없는 거래가 섞인" 값이
+    // 된다 — 분모(randomMean)와 정확히 같은 거래만 분자에 넣어야 한다.
+    const sameDay = pairTrades(
+      [
+        entry({ ticker: "P", action: "buy", date: "2025-01-02", price: 100, qty: 10, emotion: 4 }),
+        entry({ ticker: "P", action: "sell", date: "2025-01-02", price: 300, qty: 10 }),
+      ],
+      0
+    ).closed[0];
+    const normal = trade("P", 110); // 01-02 → 01-08, 대조군이 돈다
+
+    const stat = groupByEmotion([normal, sameDay], lookup, 5, 0).find((s) => s.key === "4")!;
+    expect(stat.n).toBe(2);
+    expect(stat.priceN).toBe(1);
+    expect(stat.randomMean).toBeDefined();
+    // 당일 매매(+200%)가 분자에 섞였다면 delta가 1.0을 훌쩍 넘는다.
+    expect(stat.delta).toBeCloseTo(0.1 - stat.randomMean!, 10);
   });
 });
 
@@ -411,15 +433,25 @@ describe("대조군 보유일은 거래일 기준(I-2)", () => {
     expect(stat.randomMean).toBeCloseTo(expected!, 12);
   });
 
-  it("종가 배열에서 진입·청산이 같은 거래일로 잡히면 그 거래는 대조군에서 빠진다", () => {
-    // 종가 배열이 매매일보다 나중에 시작하면 진입·청산 모두 첫 인덱스로 잡힌다
-    // → 보유일 0. 0일짜리 무작위 진입은 비용만 빼는 무의미한 수치라 제외한다.
+  it("종가 배열이 매수일보다 나중에 시작하면 그 거래는 대조군에서 빠진다", () => {
+    // 진입일이 시리즈 시작 전이면 "그 다음 거래일"이 아니라 아예 데이터 밖이다.
+    // 첫 인덱스로 붙여버리면 보유 기간이 실제보다 짧게 잡혀(여기서는 0일) 잘못된
+    // 대조군이 나온다 — 계산하지 않는 편이 정직하다.
     const later = closesFrom("2025-06-01", 60, 0.002);
     const t = fridayToTuesday();
     const stat = groupByEmotion([t], () => later, 5, 0).find((s) => s.key === "2")!;
-    expect(stat.priceN).toBe(1); // 시세 자체는 찾았다
+    expect(stat.priceN).toBe(0);
     expect(stat.randomMean).toBeUndefined();
     expect(stat.delta).toBeUndefined();
+  });
+
+  it("매도일만 시리즈 끝을 넘어가는 경우에도 대조군을 만들지 않는다", () => {
+    // 청산일이 데이터 끝보다 뒤면 보유 거래일을 알 수 없다.
+    const short = closesFrom("2025-01-01", 4, 0.002); // 01-01~01-04
+    const t = fridayToTuesday(); // 01-03 매수 → 01-07 매도(데이터 밖)
+    const stat = groupByEmotion([t], () => short, 5, 0).find((s) => s.key === "2")!;
+    expect(stat.priceN).toBe(0);
+    expect(stat.randomMean).toBeUndefined();
   });
 });
 
@@ -436,6 +468,20 @@ describe("pairTrades — 값이 이상한 기록 방어(I-3)", () => {
     expect(Number.isNaN(closed[0].netReturn)).toBe(false);
     expect(closed[0].netReturn).toBeCloseTo(0.1, 10);
     expect(closed[0].entryDate).toBe("2025-01-02");
+    expect(open).toHaveLength(0);
+  });
+
+  it("price가 0인 매수는 무시한다(평균단가 0 → 수익률 Infinity 방지)", () => {
+    const entries: JournalEntry[] = [
+      entry({ ticker: "N", action: "buy", date: "2025-01-01", price: 0, qty: 10 }),
+      entry({ ticker: "N", action: "buy", date: "2025-01-02", price: 100, qty: 10 }),
+      entry({ ticker: "N", action: "sell", date: "2025-01-05", price: 110, qty: 10 }),
+    ];
+    const { closed, open } = pairTrades(entries, 0);
+    expect(closed).toHaveLength(1);
+    expect(closed[0].avgCost).toBe(100);
+    expect(Number.isFinite(closed[0].netReturn)).toBe(true);
+    expect(closed[0].netReturn).toBeCloseTo(0.1, 10);
     expect(open).toHaveLength(0);
   });
 

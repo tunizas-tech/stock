@@ -118,7 +118,10 @@ describe("POST /api/journal/review", () => {
     expect(body.closedCount).toBe(1); // 일지 자체 값(실제 수익)은 그대로 집계된다
     expect(body.missingPrices).toContain(evil);
 
-    // data/ 밖으로 나가는 경로로는 존재 확인조차 하지 않았어야 한다.
+    // 파일 존재 확인조차 하지 않았어야 한다 — 경로가 안전한지가 아니라
+    // "아예 안 갔다"를 단언한다(빈 배열이면 아래 루프가 통째로 건너뛰므로
+    // 루프만으로는 검증이 공허해진다).
+    expect(fsState.existsCalls).toEqual([]);
     for (const p of fsState.existsCalls) {
       expect(p.startsWith("data/")).toBe(true);
       expect(p).not.toContain("..");
@@ -131,8 +134,6 @@ describe("POST /api/journal/review", () => {
       settings: { sealDays: 180 },
     });
     expect(res.status).toBe(200);
-    for (const p of fsState.existsCalls) {
-      expect(p).not.toContain("..");
-    }
+    expect(fsState.existsCalls).toEqual([]);
   });
 });

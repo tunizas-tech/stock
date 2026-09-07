@@ -22,6 +22,7 @@ import {
   sealOpensOn,
   type JournalSettings,
 } from "@/lib/journal/settings";
+import { MIN_SAMPLE } from "@/lib/journal/review";
 import type { EmotionGroupStat, GroupStat } from "@/lib/journal/review";
 import type { JournalEntry } from "@/lib/types";
 
@@ -239,13 +240,10 @@ function SealedView({
 function ReviewSection({
   title,
   caption,
-  note,
   children,
 }: {
   title: string;
   caption: string;
-  /** 캡션 아래 한 줄 더 — 표를 읽는 데 필요한 단서(예: 차이의 모집단). */
-  note?: string;
   children?: React.ReactNode;
 }) {
   return (
@@ -253,14 +251,14 @@ function ReviewSection({
       <h2 className="mb-3 font-serif text-lg font-semibold text-ink">{title}</h2>
       {children}
       <p className="mt-3 max-w-2xl text-xs leading-relaxed text-muted">{caption}</p>
-      {note && <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted">{note}</p>}
     </section>
   );
 }
 
-// 세 묶음 표에 공통으로 붙는 한 줄. delta는 시세를 찾은 거래끼리만 비교한
-// 값이라(review.ts computeGroupStat), n과 "시세 n"이 다를 수 있다는 사실을
-// 표 옆의 작은 글씨와 이 문장이 같이 알린다.
+// 세 묶음 표에 모두 해당되는 한 줄이라 표마다 되풀이하지 않고 맨 위 카드에서
+// 한 번만 말한다. delta는 대조군이 실제로 돈 거래끼리만 비교한 값이라
+// (review.ts computeGroupStat), n과 "시세 n"이 다를 수 있다 — 표 옆의 작은
+// 글씨가 그 차이를 행마다 알리고, 이 문장이 이유를 한 번 설명한다.
 const DELTA_NOTE = "무작위 대비 차이는 시세가 있는 거래끼리만 비교한 값이다.";
 
 function InsufficientChip() {
@@ -272,12 +270,12 @@ function InsufficientChip() {
 }
 
 /**
- * 수치 셀의 색. 표본이 20건 미만인 행(insufficient)은 손익 색을 주지 않고 회색
- * 그대로 둔다 — "판단 보류"라고 적어놓고 초록/빨강으로 칠하면 그 색이 먼저
- * 읽혀 결국 판단하게 된다.
+ * 수치 셀의 색. 표본이 모자란 칸은 손익 색을 주지 않고 회색 그대로 둔다 —
+ * "판단 보류"라고 적어놓고 초록/빨강으로 칠하면 그 색이 먼저 읽혀 결국
+ * 판단하게 된다. 숫자 자체는 항상 그대로 보여준다(빈칸으로 지우지 않는다).
  */
-function cellClass(insufficient: boolean, v: number | undefined): string {
-  if (insufficient || v === undefined) return "";
+function cellClass(grey: boolean, v: number | undefined): string {
+  if (grey || v === undefined) return "";
   return pnlClass(v);
 }
 
@@ -308,48 +306,55 @@ function GroupTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr
-              key={r.key}
-              className={`border-b border-line/60 last:border-0 ${
-                r.insufficient ? "text-muted" : "text-ink"
-              }`}
-            >
-              <td className="px-4 py-3 font-medium">
-                {r.key}
-                {r.insufficient && <InsufficientChip />}
-              </td>
-              {showDeclaredProb && (
-                <td className="tabular px-4 py-3 text-right">
-                  {fmtRate((r as EmotionGroupStat).declaredProb)}
+          {rows.map((r) => {
+            // 대조군 3칸(무작위·차이·반사실)은 전체 n이 아니라 priceN이 모집단이다
+            // — n이 20을 넘겨도 대조군이 5건에서만 돌았다면 그 세 칸은 여전히
+            // 판단할 수 없는 숫자다. 행 전체 회색과 별개로 여기서 한 번 더 본다.
+            const benchGrey = r.insufficient || r.priceN < MIN_SAMPLE;
+            return (
+              <tr
+                key={r.key}
+                className={`border-b border-line/60 last:border-0 ${
+                  r.insufficient ? "text-muted" : "text-ink"
+                }`}
+              >
+                <td className="px-4 py-3 font-medium">
+                  {r.key}
+                  {r.insufficient && <InsufficientChip />}
                 </td>
-              )}
-              <td className="tabular px-4 py-3 text-right">
-                {r.n}
-                {r.priceN < r.n && (
-                  // 차이(delta)의 모집단이 전체 n보다 작다는 사실을 숫자 옆에
-                  // 그대로 둔다 — 표에서 빠지면 "무작위보다 나았다"를 전체
-                  // 거래에 대한 말로 읽게 된다.
-                  <span className="ml-1.5 text-[10px] font-normal text-muted">
-                    시세 {r.priceN}
-                  </span>
+                {showDeclaredProb && (
+                  <td className="tabular px-4 py-3 text-right">
+                    {fmtRate((r as EmotionGroupStat).declaredProb)}
+                  </td>
                 )}
-              </td>
-              <td className="tabular px-4 py-3 text-right">{fmtRate(r.winRate)}</td>
-              <td className={`tabular px-4 py-3 text-right ${cellClass(r.insufficient, r.mean)}`}>
-                {fmtSignedRate(r.mean)}
-              </td>
-              <td className={`tabular px-4 py-3 text-right ${cellClass(r.insufficient, r.randomMean)}`}>
-                {fmtSignedRate(r.randomMean)}
-              </td>
-              <td className={`tabular px-4 py-3 text-right ${cellClass(r.insufficient, r.delta)}`}>
-                {fmtSignedRate(r.delta)}
-              </td>
-              <td className={`tabular px-4 py-3 text-right ${cellClass(r.insufficient, r.cfMean20)}`}>
-                {fmtSignedRate(r.cfMean20)}
-              </td>
-            </tr>
-          ))}
+                <td className="tabular px-4 py-3 text-right">
+                  {r.n}
+                  {r.priceN < r.n && (
+                    // 차이(delta)의 모집단이 전체 n보다 작다는 사실을 숫자 옆에
+                    // 그대로 둔다 — 표에서 빠지면 "무작위보다 나았다"를 전체
+                    // 거래에 대한 말로 읽게 된다.
+                    <span className="ml-1.5 text-[10px] font-normal text-muted">
+                      시세 {r.priceN}
+                    </span>
+                  )}
+                </td>
+                <td className="tabular px-4 py-3 text-right">{fmtRate(r.winRate)}</td>
+                <td className={`tabular px-4 py-3 text-right ${cellClass(r.insufficient, r.mean)}`}>
+                  {fmtSignedRate(r.mean)}
+                </td>
+                <td className={`tabular px-4 py-3 text-right ${cellClass(benchGrey, r.randomMean)}`}>
+                  {fmtSignedRate(r.randomMean)}
+                </td>
+                <td className={`tabular px-4 py-3 text-right ${cellClass(benchGrey, r.delta)}`}>
+                  {fmtSignedRate(r.delta)}
+                  {r.priceN < MIN_SAMPLE && <InsufficientChip />}
+                </td>
+                <td className={`tabular px-4 py-3 text-right ${cellClass(benchGrey, r.cfMean20)}`}>
+                  {fmtSignedRate(r.cfMean20)}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -387,12 +392,12 @@ function ReviewSections({ data }: { data: ReviewResponse }) {
       <div className="flex flex-wrap items-center gap-8 rounded-xl2 border border-line bg-surface p-4">
         <Stat label="청산된 거래" value={`${data.closedCount}건`} />
         <Stat label="진행 중" value={`${data.openCount}건 — 수익에 넣지 않음`} />
+        <p className="w-full text-xs leading-relaxed text-muted">{DELTA_NOTE}</p>
       </div>
 
       <ReviewSection
         title="확신도별"
         caption="선언 확률과 실제 승률의 차이가 보정 오차다. 대부분 과신 쪽으로 나온다."
-        note={DELTA_NOTE}
       >
         <GroupTable rows={data.byEmotion} keyLabel="확신도" showDeclaredProb />
       </ReviewSection>
@@ -400,7 +405,6 @@ function ReviewSections({ data }: { data: ReviewResponse }) {
       <ReviewSection
         title="주 이유별"
         caption="무작위 대조를 못 이기는 이유는 그 이유로 사지 않는 편이 낫다는 뜻이다."
-        note={DELTA_NOTE}
       >
         <GroupTable rows={data.byTag} keyLabel="주 이유" />
       </ReviewSection>
@@ -408,7 +412,6 @@ function ReviewSections({ data }: { data: ReviewResponse }) {
       <ReviewSection
         title="보유기간별"
         caption="반사실은 집계일 뿐이다. 개별 거래의 '팔지 않았으면'은 후회를 만들 뿐 규율을 돕지 않는다."
-        note={DELTA_NOTE}
       >
         <GroupTable rows={data.byHold} keyLabel="보유기간" />
       </ReviewSection>

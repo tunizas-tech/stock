@@ -91,13 +91,15 @@ export function pairTrades(
     // price가 null이나 문자열로 들어오면 undefined 검사만으로는 통과해 버리고,
     // 그 뒤 평균단가 계산이 NaN이 되어 그 종목의 모든 거래(그리고 그 거래가
     // 속한 묶음 평균 전체)가 NaN으로 오염된다 — 한 줄의 나쁜 값이 화면 전체를
-    // 망치지 않도록 여기서 걸러낸다. qty<=0도 같은 이유다(0주 매수는 평균단가
-    // 계산을 0으로 나눈다).
+    // 망치지 않도록 여기서 걸러낸다. price<=0·qty<=0도 같은 이유다: 0주 매수는
+    // 평균단가 계산을 0으로 나누고, 가격 0짜리 매수는 평균단가를 0으로 만들어
+    // 그 뒤 수익률이 Infinity가 된다.
     if (
       typeof e.price !== "number" ||
       typeof e.qty !== "number" ||
       !Number.isFinite(e.price) ||
       !Number.isFinite(e.qty) ||
+      e.price <= 0 ||
       e.qty <= 0
     )
       continue;
@@ -257,8 +259,10 @@ export interface GroupStat {
   /** 이 묶음의 전체 거래 수 — mean·winRate의 모집단(스펙 §3 "모든 칸에 표본 수"). */
   n: number;
   /**
-   * 그중 로컬에 시세가 있어 대조군·반사실을 계산할 수 있었던 거래 수.
-   * `delta`의 모집단이다 — n과 다르면 화면이 그 사실을 같이 보여준다.
+   * 그중 로컬 시세로 무작위 대조군을 **실제로 돌린** 거래 수 — `delta`의
+   * 모집단이다(분자와 분모가 정확히 같은 거래). 시세가 아예 없는 종목, 당일
+   * 매매(보유 거래일 0), 시세 구간 밖의 매매는 전부 여기서 빠진다.
+   * n과 다르면 화면이 그 사실을 같이 보여준다.
    */
   priceN: number;
   insufficient: boolean;
@@ -280,11 +284,16 @@ const COUNTERFACTUAL_HORIZON_DAYS = 20;
 /**
  * 종가 배열에서 이 날짜의 인덱스. 그날 거래가 없었으면(주말·휴장) 그 다음
  * 거래일 인덱스를 준다. 배열 끝을 넘으면 undefined.
+ *
+ * 시리즈 시작 **전**의 날짜도 undefined다 — "그 다음 거래일"이 아니라 아예
+ * 데이터 밖이기 때문이다. 첫 인덱스(0)로 붙여버리면 보유 기간이 실제보다
+ * 짧게 잡혀 잘못된 대조군이 나온다.
  */
 function tradingDayIndex(
   closes: { date: string; close: number }[],
   date: string
 ): number | undefined {
+  if (closes.length === 0 || date < closes[0].date) return undefined;
   const i = closes.findIndex((c) => c.date >= date);
   return i < 0 ? undefined : i;
 }
@@ -307,16 +316,16 @@ function computeGroupStat(
   const mean = avg(netReturns);
   const winRate = netReturns.filter((r) => r > 0).length / n;
 
-  // 시세를 찾은 거래의 수익만 따로 모은다 — 대조군(randomMean)은 이 거래들에서만
+  // 대조군이 실제로 돈 거래의 수익만 따로 모은다 — randomMean은 그 거래들에서만
   // 나오므로, 전체 평균(mean)에서 빼면 서로 다른 모집단을 뺀 수치가 된다.
-  // "무작위보다 나았다"가 사실은 "시세 없는 종목이 잘됐다"일 수 있다는 뜻이다.
+  // "무작위보다 나았다"가 사실은 "대조군이 없던 거래가 잘됐다"일 수 있다는 뜻이다.
+  // 두 배열은 항상 같은 거래에서 같이 채워진다(분자와 분모가 같은 모집단).
   const pricedReturns: number[] = [];
   const randomMeans: number[] = [];
   const cfMeans: number[] = [];
   for (const t of trades) {
     const prices = priceLookup(t.ticker);
     if (prices === undefined) continue;
-    pricedReturns.push(t.netReturn);
 
     // 대조군 보유일은 **거래일** 차이다. randomBenchmark는 종가 배열의 인덱스를
     // 그대로 더하므로 달력일(t.holdDays)을 넘기면 주말만큼 더 긴 기간과 비교하게
@@ -331,16 +340,21 @@ function computeGroupStat(
     // 있는 경우 등) — 0일짜리 무작위 진입은 비용만 빼는 무의미한 값이라 뺀다.
     if (tradingHold > 0) {
       const rb = randomBenchmark(prices, tradingHold, RANDOM_BENCHMARK_COUNT, seed, roundTrip);
-      if (rb !== undefined) randomMeans.push(rb);
+      if (rb !== undefined) {
+        randomMeans.push(rb);
+        pricedReturns.push(t.netReturn);
+      }
     }
 
     const cf = forwardReturn(prices, t.entryDate, COUNTERFACTUAL_HORIZON_DAYS, roundTrip);
     if (cf !== undefined) cfMeans.push(cf);
   }
 
-  const priceN = pricedReturns.length;
-  const randomMean = priceN > 0 && randomMeans.length > 0 ? avg(randomMeans) : undefined;
-  const cfMean20 = priceN > 0 && cfMeans.length > 0 ? avg(cfMeans) : undefined;
+  const priceN = pricedReturns.length; // === randomMeans.length
+  const randomMean = randomMeans.length > 0 ? avg(randomMeans) : undefined;
+  // 반사실은 대조군과 조건이 다르다(진입 다음 거래일부터 20거래일이면 되고 실제
+  // 보유 기간을 몰라도 된다) — 그래서 priceN이 아니라 자기 표본으로만 판단한다.
+  const cfMean20 = cfMeans.length > 0 ? avg(cfMeans) : undefined;
   const delta = randomMean !== undefined ? avg(pricedReturns) - randomMean : undefined;
 
   return {
