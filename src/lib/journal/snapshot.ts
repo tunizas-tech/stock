@@ -13,6 +13,12 @@ import { decompose, type DayReturn } from "../backtest/returns";
 export interface SnapshotInput {
   ticker: string;
   date: string; // 매매일 YYYY-MM-DD
+  /**
+   * 섹터를 직접 지정(7단계 에이전트 문). 있으면 FLOW_UNIVERSE 조회 대신 이 값을
+   * 쓴다 — 에이전트가 다루는 종목은 수급 유니버스 30종목 밖일 수 있어, 유니버스
+   * 매핑에만 기대면 섹터를 못 찾아 coverage가 항상 "none"으로 떨어진다.
+   */
+  sector?: string;
   kospiCandles: Candle[]; // 거래일 달력의 출처
   nasdaqCandles: Candle[];
   flows: StockFlow[]; // 30종목 수급 (전체 이력)
@@ -135,7 +141,7 @@ export function buildSnapshot(input: SnapshotInput): JournalSnapshot {
       return { asOf: "", coverage: "none" };
     }
 
-    const sector = FLOW_UNIVERSE.find((s) => s.ticker === ticker)?.sector;
+    const sector = input.sector ?? FLOW_UNIVERSE.find((s) => s.ticker === ticker)?.sector;
 
     // 코스피 갭·장중, 나스닥 전일 등락은 섹터 매핑 여부와 무관하게(종목이
     // 유니버스 밖이어도) 계산할 수 있는 시장 전체 정보라 항상 시도한다.

@@ -125,6 +125,20 @@ describe("buildSnapshot — C1 asOf 규칙", () => {
     expect(snap.sector).toBeUndefined();
   });
 
+  it("FLOW_UNIVERSE 밖 종목이어도 input.sector를 주면 그 값을 쓴다(유니버스 조회보다 우선, 7단계 에이전트 문)", () => {
+    const snap = buildSnapshot({
+      ticker: "999999",
+      date: "2025-09-04",
+      sector: "배터리",
+      kospiCandles: kospi(),
+      nasdaqCandles: nasdaq(),
+      flows: baseFlows(),
+      sectorEtfCandles: {},
+    });
+    expect(snap.coverage).not.toBe("none");
+    expect(snap.sector).toBe("배터리");
+  });
+
   it("ETF 매핑이 없는 섹터(조선)는 sectorRsRank가 undefined, coverage는 partial", () => {
     const flows: StockFlow[] = [
       {
