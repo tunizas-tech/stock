@@ -30,6 +30,7 @@ import {
   type PriceLookup,
 } from "@/lib/journal/review";
 import { DEFAULT_ROUND_TRIP } from "@/lib/backtest/cost";
+import { isSafeTicker } from "@/lib/journal/validate";
 
 export const dynamic = "force-dynamic";
 
@@ -89,7 +90,15 @@ export async function POST(req: Request): Promise<NextResponse> {
   const missingPrices = new Set<string>();
   const priceLookup: PriceLookup = (ticker) => {
     if (!priceCache.has(ticker)) {
-      const prices = flowCloses(ticker) ?? candleCloses(ticker);
+      // 티커는 entries(사용자 기기에서 온 값)에서 그대로 오고 아래 두 함수에서
+      // 파일 경로에 박힌다 — 형식에 맞지 않는 값은 파일시스템을 아예 건드리지
+      // 않고 "가격 없음"으로 처리한다. 여기서 400을 내지 않는 이유: 옛 기록
+      // 하나가 형식에서 벗어났다고 전체 자기검증 화면을 막으면, 사용자는 고칠
+      // 방법도 없이 §4 화면 전체를 잃는다. 그 종목은 missingPrices에 이름이
+      // 올라 "대조군·반사실에서 빠졌다"고 화면이 정직하게 알린다.
+      const prices = isSafeTicker(ticker)
+        ? flowCloses(ticker) ?? candleCloses(ticker)
+        : undefined;
       priceCache.set(ticker, prices);
       if (prices === undefined) missingPrices.add(ticker);
     }

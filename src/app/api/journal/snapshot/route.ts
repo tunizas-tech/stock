@@ -16,15 +16,12 @@ import { NextResponse } from "next/server";
 import type { Candle, JournalSnapshot } from "@/lib/types";
 import type { StockFlow } from "@/lib/flow/aggregate";
 import { buildSnapshot, SECTOR_ROTATION_ETF } from "@/lib/journal/snapshot";
+import { DATE_RE, TICKER_RE } from "@/lib/journal/validate";
 
 export const dynamic = "force-dynamic";
 
 const CANDLES_DIR = "data/candles";
 const FLOW_DIR = "data/flow";
-
-// KR: 6자리 숫자. US: 1~5자리 대문자 알파벳(예: AAPL, NVDA).
-const TICKER_RE = /^(\d{6}|[A-Z]{1,5})$/;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 interface CandleFile {
   label?: string;
