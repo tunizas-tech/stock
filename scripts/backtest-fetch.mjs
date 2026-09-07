@@ -328,15 +328,26 @@ if (process.env.DATABASE_URL) {
         /* 손상 → 처음부터 */
       }
     }
+    // [2]~[4]가 이미 label·kind를 갖춰 적재하는 코드는 절대 여기서 다시 받지 않는다.
+    // loadTarget은 파일 전체를 다시 쓰므로 같은 코드를 stock으로 받으면 label이
+    // "KODEX 반도체" → "091160"으로 덮이고, label로 ETF를 찾는 snapshot-data.ts가
+    // 그 순간부터 sectorRsRank를 영구히 놓친다(경고 한 줄 없이).
+    const managed = new Set([...INDICES, ...SECTOR_ETFS, ...ROTATION_ETFS].map((t) => t.code));
     const todo = journalTickersToFetch(
       rows.map((r) => r.ticker),
       lastDates,
-      todayKst()
+      todayKst(),
+      managed
     );
     console.log(`  대상 ${todo.length}종목`);
     for (const { ticker, from } of todo) {
       await loadTarget(token, { market: "KR", code: ticker, kind: "stock", label: ticker, from });
     }
+  } catch (e) {
+    // 이 단계는 선택이다(설계 §8). journal 테이블이 아직 없거나(첫 배포) DB가 잠깐
+    // 죽어도 [2]~[4]로 받은 19종은 이미 디스크에 있다 — 여기서 던지면 매일 아침
+    // 예약 작업이 빨갛게 뜨고 "완료" 줄이 안 찍힐 뿐, 잃는 것은 없다.
+    console.log(`  경고: 일지 종목 적재 건너뜀 — ${e.message}`);
   } finally {
     await pool.end();
   }

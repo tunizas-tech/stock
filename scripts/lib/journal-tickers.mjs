@@ -18,11 +18,16 @@ export function yesterdayOf(today) {
   return shiftDays(today, -1);
 }
 
-export function journalTickersToFetch(tickers, lastDates, today) {
+// exclude — 이미 [2]~[4]에서 label/kind를 갖춰 적재 중인 코드 집합(지수·섹터 ETF·
+// 로테이션 ETF). 여기를 통과시키면 loadTarget이 같은 파일을 label: "091160",
+// kind: "stock"으로 덮어써 snapshot-data.ts의 label 기준 ETF 맵이 영구히 빗나간다
+// (sectorRsRank가 조용히 사라진다). 그래서 "받을 필요 없다"가 아니라 "받으면 안 된다".
+export function journalTickersToFetch(tickers, lastDates, today, exclude = new Set()) {
   const out = [];
   const yesterday = yesterdayOf(today);
   for (const t of new Set(tickers)) {
     if (!KR.test(t)) continue;
+    if (exclude.has(t)) continue;
     const last = lastDates.get(t);
     if (last === undefined) {
       out.push({ ticker: t, from: ymd(shiftYears(today, -2)) });

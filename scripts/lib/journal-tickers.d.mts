@@ -3,5 +3,7 @@ export declare function yesterdayOf(today: string): string;
 export declare function journalTickersToFetch(
   tickers: string[],
   lastDates: Map<string, string | undefined>,
-  today: string
+  today: string,
+  /** 이미 다른 단계가 label·kind를 갖춰 적재 중인 코드 — 덮어쓰면 안 된다. */
+  exclude?: Set<string>
 ): { ticker: string; from: string }[];
