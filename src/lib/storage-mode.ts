@@ -1,4 +1,5 @@
-// 저장 백엔드 런타임 감지(설계 §1). 서버에 DATABASE_URL이 있으면 "server", 아니면 "local".
+// 저장 백엔드 런타임 감지(설계 §1) — 세 테이블(일지·보유·관심) 공용.
+// 서버에 DATABASE_URL이 있으면 "server", 아니면 "local".
 // NEXT_PUBLIC_ 변수로 빌드에 굽지 않는 이유: Coolify에서 환경변수를 바꿀 때마다 재빌드해야
 // 하는 함정을 없애고, 같은 이미지가 로컬(localStorage)·서버(Postgres) 어디서나 돈다.
 //
@@ -24,7 +25,7 @@ let inflight: Promise<StorageMode> | undefined;
 export function detectStorageMode(fetchFn: typeof fetch = fetch): Promise<StorageMode> {
   if (cached) return Promise.resolve(cached);
   if (!inflight) {
-    inflight = fetchFn("/api/journal/mode", { cache: "no-store" })
+    inflight = fetchFn("/api/storage/mode", { cache: "no-store" })
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const body = (await r.json()) as { mode?: unknown };
