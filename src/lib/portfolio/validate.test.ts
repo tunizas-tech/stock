@@ -42,6 +42,11 @@ describe("parseWatch", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.memo).toBe("");
   });
+  it("memo: null도 빈 문자열로 허용 — 옛 localStorage 행의 실제 유입 형태(validate.ts:30)", () => {
+    const r = parseWatch({ ...W, memo: null });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.memo).toBe("");
+  });
   it.each([
     ["memo", { memo: "x".repeat(501) }],
     ["memo", { memo: 3 }],
@@ -60,5 +65,9 @@ describe("parseImportId", () => {
     expect(parseImportId("")).toBeUndefined();
     expect(parseImportId("x".repeat(65))).toBeUndefined();
     expect(parseImportId(3)).toBeUndefined();
+  });
+  it("경계값 1자·64자는 허용", () => {
+    expect(parseImportId("x")).toBe("x");
+    expect(parseImportId("x".repeat(64))).toBe("x".repeat(64));
   });
 });

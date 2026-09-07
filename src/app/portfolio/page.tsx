@@ -42,7 +42,10 @@ export default function PortfolioPage() {
   const [mode, setMode] = useState<StorageMode>("local");
   const [localH, setLocalH] = useState<Holding[]>([]);
   const [localW, setLocalW] = useState<WatchItem[]>([]);
-  const [importMsg, setImportMsg] = useState<string | null>(null);
+  // 보유·관심 이관 결과를 하나로 합치면(구 importMsg) 관심종목 카드에서 올린
+  // 결과가 위쪽 보유 종목 섹션에 뜬다 — 카드별로 분리해 각자 자기 카드 밑에 뜨게 한다.
+  const [importMsgH, setImportMsgH] = useState<string | null>(null);
+  const [importMsgW, setImportMsgW] = useState<string | null>(null);
 
   async function refresh() {
     try {
@@ -97,10 +100,10 @@ export default function PortfolioPage() {
       if (keep.length === 0) db.clearLocalHoldings();
       else db.replaceLocalHoldings(keep);
       setLocalH(keep);
-      setImportMsg(message);
+      setImportMsgH(message);
       await refresh();
     } catch (e) {
-      setImportMsg(e instanceof Error ? e.message : "이관 실패");
+      setImportMsgH(e instanceof Error ? e.message : "이관 실패");
     }
   }
 
@@ -111,10 +114,10 @@ export default function PortfolioPage() {
       if (keep.length === 0) db.clearLocalWatch();
       else db.replaceLocalWatch(keep);
       setLocalW(keep);
-      setImportMsg(message);
+      setImportMsgW(message);
       await refresh();
     } catch (e) {
-      setImportMsg(e instanceof Error ? e.message : "이관 실패");
+      setImportMsgW(e instanceof Error ? e.message : "이관 실패");
     }
   }
 
@@ -136,7 +139,7 @@ export default function PortfolioPage() {
           seedNote="예시 데이터(삼성전자·Apple)는 올리지 않습니다 — 실제 보유면 직접 추가하세요."
           onImport={importHoldings}
         />
-        {importMsg && <p className="mb-4 text-xs text-muted">{importMsg}</p>}
+        {importMsgH && <p className="mb-4 text-xs text-muted">{importMsgH}</p>}
 
         <div className="mb-6">
           <HoldingForm onSubmit={handleAddHolding} />
@@ -178,6 +181,7 @@ export default function PortfolioPage() {
           seedNote="예시 데이터(NAVER·NVIDIA)는 올리지 않습니다 — 실제 관심 종목이면 직접 추가하세요."
           onImport={importWatch}
         />
+        {importMsgW && <p className="mb-4 text-xs text-muted">{importMsgW}</p>}
 
         {loading ? (
           <p className="text-sm text-muted">불러오는 중…</p>

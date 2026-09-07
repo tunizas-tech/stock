@@ -12,7 +12,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   const pool = getPool();
   if (!pool) return NextResponse.json({ error: "DATABASE_URL 미설정" }, { status: 503 });
   let body: { rows?: unknown };
-  try { body = await req.json(); } catch { return NextResponse.json({ error: "잘못된 본문" }, { status: 400 }); }
+  // POST 라우트(holdings/route.ts)와 형태를 맞춘다 — field 없이 message만 오면
+  // portfolio-client.ts가 "field:" 접두사 없이 보여준다(그 자체로는 동작하지만 어색함).
+  try { body = await req.json(); } catch { return NextResponse.json({ error: "잘못된 본문", field: "body" }, { status: 400 }); }
   if (!Array.isArray(body.rows)) return NextResponse.json({ error: "rows 배열 필요", field: "rows" }, { status: 400 });
   const rows: Holding[] = [];
   const rejected: { index: number; id?: unknown; field: string; error: string }[] = [];

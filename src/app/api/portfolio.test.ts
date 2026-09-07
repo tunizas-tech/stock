@@ -66,6 +66,11 @@ describe("holdings", () => {
     expect(body.inserted).toBe(1);
     expect(body.rejected.map((r: { index: number; field: string }) => [r.index, r.field])).toEqual([[1, "shares"], [2, "id"]]);
   });
+  it("깨진 JSON 본문 → 400 field=body (POST 라우트와 형태 동일)", async () => {
+    const res = await HIMPORT(new Request("http://localhost/api/holdings/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{not json" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).field).toBe("body");
+  });
 });
 
 describe("watchlist", () => {
@@ -81,5 +86,10 @@ describe("watchlist", () => {
   });
   it("rows가 배열이 아니면 400", async () => {
     expect((await WIMPORT(req("POST", "/api/watchlist/import", { rows: "no" }))).status).toBe(400);
+  });
+  it("깨진 JSON 본문 → 400 field=body (POST 라우트와 형태 동일)", async () => {
+    const res = await WIMPORT(new Request("http://localhost/api/watchlist/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{not json" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).field).toBe("body");
   });
 });
