@@ -251,6 +251,15 @@ export const db = {
     );
   },
 
+  /**
+   * 이관에서 거절된 행만 남기고 나머지를 지운다. 전부 비우는 clearLocalJournal과
+   * 나눠 둔 이유: 서버가 받지 않은 행까지 지우면 그 기록은 어디에도 남지 않는다.
+   */
+  replaceLocalJournal(rows: JournalEntry[]): void {
+    if (typeof window === "undefined") return;
+    lsWrite(LS_KEYS.journal, rows);
+  },
+
   /** 이관 완료 후 이 브라우저의 사본을 비운다(중복 이관 방지). */
   clearLocalJournal(): void {
     if (typeof window === "undefined") return;

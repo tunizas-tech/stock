@@ -16,6 +16,7 @@ import {
 } from "@/lib/format";
 import { detectStorageMode, type StorageMode } from "@/lib/storage-mode";
 import { importJournalEntries } from "@/lib/journal-client";
+import { splitImportResult } from "@/lib/journal-import";
 import type { JournalAction, JournalEntry } from "@/lib/types";
 
 const ACTION_LABEL: Record<JournalAction, string> = {
@@ -95,14 +96,13 @@ export default function JournalPage() {
   async function handleImport() {
     try {
       const r = await importJournalEntries(localLeft);
-      db.clearLocalJournal();
-      setLocalLeft([]);
-      // 못 올린 행이 있으면 숫자를 반드시 말한다 — "다 올라갔다"고 읽고 브라우저
-      // 사본을 지운 뒤에야 몇 건이 사라진 걸 알면 되돌릴 방법이 없다.
-      const rejected = r.rejected?.length
-        ? `, ${r.rejected.length}건은 형식이 맞지 않아 못 올림(${r.rejected[0].field})`
-        : "";
-      setImportMsg(`${r.inserted}건 올림, ${r.skipped}건은 이미 있어 건너뜀${rejected}`);
+      // 서버가 받지 않은 행(rejected)까지 지우면 그 기록은 어디에도 남지 않는다 —
+      // 무엇을 남길지는 순수 함수에 두고 테스트로 못 박는다(journal-import.ts).
+      const { keep, message } = splitImportResult(localLeft, r);
+      if (keep.length === 0) db.clearLocalJournal();
+      else db.replaceLocalJournal(keep);
+      setLocalLeft(keep);
+      setImportMsg(message);
       await refresh();
     } catch (e) {
       setImportMsg(e instanceof Error ? e.message : "이관 실패");
@@ -143,7 +143,7 @@ export default function JournalPage() {
             이 브라우저에 남아 있는 기록 <b>{localLeft.length}건</b>이 서버에 없습니다.
           </p>
           <p className="mt-1 text-xs text-muted">
-            한 번 올리면 이 브라우저의 사본은 비웁니다. 같은 기록은 두 번 들어가지 않습니다.
+            올라간 기록만 이 브라우저에서 지웁니다. 같은 기록은 두 번 들어가지 않습니다.
           </p>
           <button
             onClick={handleImport}
