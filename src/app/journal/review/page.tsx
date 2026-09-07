@@ -1,0 +1,426 @@
+"use client";
+
+// 자기검증(/journal/review, 6단계 설계 §4). 매매일지에 이미 있는 확신도·주 이유·
+// 스냅샷을 대조군·반사실과 함께 집계해 "내 판단력 자체"를 사용자 데이터로 보여준다.
+//
+// N2(측정을 아는 순간 자기보고가 오염된다) — 첫 기록으로부터 sealDays(기본 180일)
+// 동안은 이 페이지가 봉인 카드만 보여주고 그 아래 분석은 전부 가린다. 봉인이 풀린
+// 뒤에도 여기 나오는 건 "결과"이지 "전략"이 아니다 — C3(반사실은 집계만, 거래별
+// 표시 금지)와 C2(모든 묶음에 무작위 대조군 병기)를 API가 이미 지켰고, 이 페이지는
+// 그걸 표 밖으로 새어나가게 하지 않는다.
+import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/EmptyState";
+import { db } from "@/lib/data";
+import { fmtDate, fmtPct, pnlClass, todayISO } from "@/lib/format";
+import {
+  DEFAULT_SETTINGS,
+  isSealed,
+  loadSettings,
+  saveSettings,
+  sealOpensOn,
+  type JournalSettings,
+} from "@/lib/journal/settings";
+import type { EmotionGroupStat, GroupStat } from "@/lib/journal/review";
+import type { JournalEntry } from "@/lib/types";
+
+interface SkipStatShape {
+  n: number;
+  cfMean20?: number;
+  insufficient: boolean;
+}
+
+interface DisciplineShape {
+  checked: number;
+  violated: number;
+  excessLoss: number;
+}
+
+interface ReviewResponse {
+  closedCount: number;
+  openCount: number;
+  byEmotion: EmotionGroupStat[];
+  byTag: GroupStat[];
+  byHold: GroupStat[];
+  skip: SkipStatShape;
+  discipline?: DisciplineShape;
+  missingPrices: string[];
+}
+
+/** 두 YYYY-MM-DD 사이의 달력일 차이(fromISO → toISO). */
+function daysBetween(fromISO: string, toISO: string): number {
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  return Math.round(
+    (Date.parse(`${toISO}T00:00:00Z`) - Date.parse(`${fromISO}T00:00:00Z`)) / MS_PER_DAY
+  );
+}
+
+/** 승률·선언 확률처럼 부호가 필요 없는 비율. fmtPct(손익용, 항상 +/− 부호)와 구분한다. */
+function fmtRate(v: number | undefined): string {
+  if (v === undefined) return "—";
+  return `${(v * 100).toFixed(1)}%`;
+}
+
+/** 손익류 수치(평균·차이·반사실). undefined면 대시, 있으면 부호 있는 %. */
+function fmtSignedRate(v: number | undefined): string {
+  return v === undefined ? "—" : fmtPct(v * 100);
+}
+
+export default function JournalReviewPage() {
+  const [entries, setEntries] = useState<JournalEntry[] | null>(null);
+  const [settings, setSettings] = useState<JournalSettings>(DEFAULT_SETTINGS);
+  const [data, setData] = useState<ReviewResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [reviewError, setReviewError] = useState(false);
+  const today = todayISO();
+
+  useEffect(() => {
+    (async () => {
+      setEntries(await db.listJournal());
+      setSettings(loadSettings());
+    })();
+  }, []);
+
+  const firstEntryDate =
+    entries && entries.length > 0
+      ? entries.reduce((min, e) => (e.date < min ? e.date : min), entries[0].date)
+      : undefined;
+
+  const sealed = isSealed(firstEntryDate, settings.sealDays, today);
+
+  useEffect(() => {
+    if (entries === null || sealed) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setReviewError(false);
+    fetch("/api/journal/review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entries, settings }),
+    })
+      .then((res) => (res.ok ? (res.json() as Promise<ReviewResponse>) : Promise.reject()))
+      .then((body) => {
+        if (!cancelled) setData(body);
+      })
+      .catch(() => {
+        if (!cancelled) setReviewError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // settings는 sealDays·stopLossPct가 바뀔 때만 재조회하면 되지만, 두 값이
+    // 참조 동일성 없이 바뀔 수 있어 객체 그대로 의존성에 둔다 — 데이터 규모가
+    // 작아(로컬 일지) 과다 재조회 비용이 문제되지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, sealed, settings.sealDays, settings.stopLossPct]);
+
+  function updateSettings(next: JournalSettings) {
+    setSettings(next);
+    saveSettings(next);
+  }
+
+  return (
+    <div>
+      <PageHeader kicker="journal · review" title="자기검증" />
+
+      {entries === null ? (
+        <p className="text-sm text-muted">불러오는 중…</p>
+      ) : sealed ? (
+        <SealedView
+          firstEntryDate={firstEntryDate as string}
+          settings={settings}
+          today={today}
+          onChangeSettings={updateSettings}
+        />
+      ) : loading ? (
+        <p className="text-sm text-muted">계산 중…</p>
+      ) : reviewError || !data ? (
+        <EmptyState title="자기검증을 불러오지 못했습니다" hint="새로고침해 다시 시도하세요." />
+      ) : data.closedCount === 0 ? (
+        <EmptyState title="아직 짝지어진 거래가 없다 — 매수와 매도를 같은 종목으로 기록하면 여기 나타난다." />
+      ) : (
+        <ReviewSections data={data} />
+      )}
+    </div>
+  );
+}
+
+// ── 봉인 상태(N2) ────────────────────────────────────────────────────────────
+
+function SealedView({
+  firstEntryDate,
+  settings,
+  today,
+  onChangeSettings,
+}: {
+  firstEntryDate: string;
+  settings: JournalSettings;
+  today: string;
+  onChangeSettings: (s: JournalSettings) => void;
+}) {
+  const opensOn = sealOpensOn(firstEntryDate, settings.sealDays);
+  const daysLeft = opensOn ? Math.max(0, daysBetween(today, opensOn)) : 0;
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <div className="rounded-xl2 border-2 border-accent bg-surface p-6">
+        <p className="tabular text-sm font-medium text-ink">
+          첫 기록 {fmtDate(firstEntryDate)}
+          {opensOn && <> · {fmtDate(opensOn)}에 열립니다 · {daysLeft}일 남음</>}
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-muted">
+          지금 보면 이후 기록이 영향을 받습니다 — 측정을 아는 순간 자기보고가 오염됩니다.
+        </p>
+      </div>
+
+      <div className="rounded-xl2 border border-line bg-surface p-5">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">설정</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="text-xs text-muted">
+            봉인 기간(일) — 0이면 즉시 열람
+            <input
+              type="number"
+              min={0}
+              value={settings.sealDays}
+              onChange={(e) =>
+                onChangeSettings({ ...settings, sealDays: Number(e.target.value) || 0 })
+              }
+              className="tabular mt-1 w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </label>
+          <label className="text-xs text-muted">
+            손절 기준(%, 선택 — 규율 절에 쓰임)
+            <input
+              type="number"
+              min={0}
+              step={0.1}
+              placeholder="예: 8"
+              value={settings.stopLossPct !== undefined ? settings.stopLossPct * 100 : ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                onChangeSettings({
+                  ...settings,
+                  stopLossPct: v ? Number(v) / 100 : undefined,
+                });
+              }}
+              className="tabular mt-1 w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </label>
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-muted">
+          지금 보면 이후 기록이 영향을 받습니다 — 측정을 아는 순간 자기보고가 오염됩니다.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── 열람 상태 ────────────────────────────────────────────────────────────────
+
+function ReviewSection({
+  title,
+  caption,
+  children,
+}: {
+  title: string;
+  caption: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section>
+      <h2 className="mb-3 font-serif text-lg font-semibold text-ink">{title}</h2>
+      {children}
+      <p className="mt-3 max-w-2xl text-xs leading-relaxed text-muted">{caption}</p>
+    </section>
+  );
+}
+
+function InsufficientChip() {
+  return (
+    <span className="ml-2 rounded border border-line px-1 py-0.5 align-middle text-[10px] font-normal text-muted">
+      판단 보류
+    </span>
+  );
+}
+
+function GroupTable({
+  rows,
+  keyLabel,
+  showDeclaredProb,
+}: {
+  rows: GroupStat[] | EmotionGroupStat[];
+  keyLabel: string;
+  showDeclaredProb?: boolean;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-xl2 border border-line bg-surface">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-line text-left text-xs text-muted">
+            <th className="px-4 py-3 font-medium">{keyLabel}</th>
+            {showDeclaredProb && (
+              <th className="px-4 py-3 text-right font-medium">선언 확률</th>
+            )}
+            <th className="px-4 py-3 text-right font-medium">n</th>
+            <th className="px-4 py-3 text-right font-medium">실제 승률</th>
+            <th className="px-4 py-3 text-right font-medium">실제 평균(비용후)</th>
+            <th className="px-4 py-3 text-right font-medium">무작위 평균</th>
+            <th className="px-4 py-3 text-right font-medium">차이</th>
+            <th className="px-4 py-3 text-right font-medium">반사실 20일 평균</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr
+              key={r.key}
+              className={`border-b border-line/60 last:border-0 ${
+                r.insufficient ? "text-muted" : "text-ink"
+              }`}
+            >
+              <td className="px-4 py-3 font-medium">
+                {r.key}
+                {r.insufficient && <InsufficientChip />}
+              </td>
+              {showDeclaredProb && (
+                <td className="tabular px-4 py-3 text-right">
+                  {fmtRate((r as EmotionGroupStat).declaredProb)}
+                </td>
+              )}
+              <td className="tabular px-4 py-3 text-right">{r.n}</td>
+              <td className="tabular px-4 py-3 text-right">{fmtRate(r.winRate)}</td>
+              <td className={`tabular px-4 py-3 text-right ${r.mean !== undefined ? pnlClass(r.mean) : ""}`}>
+                {fmtSignedRate(r.mean)}
+              </td>
+              <td
+                className={`tabular px-4 py-3 text-right ${r.randomMean !== undefined ? pnlClass(r.randomMean) : ""}`}
+              >
+                {fmtSignedRate(r.randomMean)}
+              </td>
+              <td className={`tabular px-4 py-3 text-right ${r.delta !== undefined ? pnlClass(r.delta) : ""}`}>
+                {fmtSignedRate(r.delta)}
+              </td>
+              <td
+                className={`tabular px-4 py-3 text-right ${r.cfMean20 !== undefined ? pnlClass(r.cfMean20) : ""}`}
+              >
+                {fmtSignedRate(r.cfMean20)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  valueClass,
+  insufficient,
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+  insufficient?: boolean;
+}) {
+  return (
+    <div>
+      <p className="text-xs text-muted">{label}</p>
+      <p className={`tabular text-base font-semibold ${valueClass ?? "text-ink"}`}>
+        {value}
+        {insufficient && <InsufficientChip />}
+      </p>
+    </div>
+  );
+}
+
+function ReviewSections({ data }: { data: ReviewResponse }) {
+  return (
+    <div className="space-y-10">
+      <ReviewSection
+        title="확신도별"
+        caption="선언 확률과 실제 승률의 차이가 보정 오차다. 대부분 과신 쪽으로 나온다."
+      >
+        <GroupTable rows={data.byEmotion} keyLabel="확신도" showDeclaredProb />
+      </ReviewSection>
+
+      <ReviewSection
+        title="주 이유별"
+        caption="무작위 대조를 못 이기는 이유는 그 이유로 사지 않는 편이 낫다는 뜻이다."
+      >
+        <GroupTable rows={data.byTag} keyLabel="주 이유" />
+      </ReviewSection>
+
+      <ReviewSection
+        title="보유기간별"
+        caption="반사실은 집계일 뿐이다. 개별 거래의 '팔지 않았으면'은 후회를 만들 뿐 규율을 돕지 않는다."
+      >
+        <GroupTable rows={data.byHold} keyLabel="보유기간" />
+      </ReviewSection>
+
+      <ReviewSection
+        title="관망(skip)"
+        caption="검토하고 안 산 종목의 평균이다. 이것이 없으면 판단력 자체는 잴 수 없다."
+      >
+        <div className="flex flex-wrap items-center gap-8 rounded-xl2 border border-line bg-surface p-4">
+          <Stat label="n" value={String(data.skip.n)} insufficient={data.skip.insufficient} />
+          <Stat
+            label="반사실 20일 평균"
+            value={fmtSignedRate(data.skip.cfMean20)}
+            valueClass={data.skip.cfMean20 !== undefined ? pnlClass(data.skip.cfMean20) : "text-muted"}
+          />
+        </div>
+      </ReviewSection>
+
+      <ReviewSection
+        title="규율"
+        caption={
+          data.discipline
+            ? "종가 기준이라 장중 이탈은 못 본다. 실제 규율은 이 숫자보다 나쁘다."
+            : "설정에서 손절 기준을 정하면 여기에 위반이 집계됩니다."
+        }
+      >
+        {data.discipline && (
+          <div className="flex flex-wrap items-center gap-8 rounded-xl2 border border-line bg-surface p-4">
+            <Stat label="검사 n" value={String(data.discipline.checked)} />
+            <Stat label="위반 n" value={String(data.discipline.violated)} />
+            <Stat
+              label="초과 손실 합"
+              value={fmtSignedRate(data.discipline.excessLoss)}
+              valueClass={pnlClass(data.discipline.excessLoss)}
+            />
+          </div>
+        )}
+      </ReviewSection>
+
+      {data.missingPrices.length > 0 && (
+        <ReviewSection
+          title="가격 데이터 없는 종목"
+          caption="이 종목들은 대조군·반사실에서 제외됐다."
+        >
+          <div className="flex flex-wrap gap-2">
+            {data.missingPrices.map((t) => (
+              <span
+                key={t}
+                className="tabular rounded-md border border-line px-2 py-1 text-xs text-muted"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        </ReviewSection>
+      )}
+
+      <p className="max-w-2xl border-t border-line pt-6 text-xs leading-relaxed text-muted">
+        일지엔 산 것만 있다. 관망(skip)을 기록해야 판단력 자체를 잴 수 있다. 그리고 1축
+        분석도 등급당 20건, 총 100건이 있어야 의미가 있다.
+      </p>
+    </div>
+  );
+}
