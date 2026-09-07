@@ -16,7 +16,12 @@ export interface SnapshotInput {
   kospiCandles: Candle[]; // 거래일 달력의 출처
   nasdaqCandles: Candle[];
   flows: StockFlow[]; // 30종목 수급 (전체 이력)
-  sectorEtfCandles: Record<string, Candle[]>; // 섹터 → 로테이션 ETF 캔들 (있는 것만)
+  /**
+   * 섹터명 → 그 섹터의 로테이션 ETF 캔들. 키는 `SECTOR_ROTATION_ETF`의 키
+   * (예: "반도체")이지 ETF 표시명("KODEX 반도체")이 아니다. 잘못 키우면
+   * 오류 없이 `sectorRsRank`만 영원히 undefined가 된다.
+   */
+  sectorEtfCandles: Record<string, Candle[]>;
   stockCandles?: Candle[]; // 종목 가격 (있으면). RSI용
 }
 
@@ -162,11 +167,19 @@ export function buildSnapshot(input: SnapshotInput): JournalSnapshot {
     const sectorRsRank = computeSectorRsRank(sector, asOf, sectorEtfCandles);
     const rsi14 = rsi14At(stockCandles, asOf);
 
-    // partial/full은 브리프가 명시한 대로 sectorRsRank·rsi14 두 가지로만 가른다.
-    // (sectorFlow20이 빠지는 경우는 별도로 흔치 않다 — 30종목 유니버스에 속한
-    // 섹터는 항상 flows에 최소 하나 이상의 종목을 갖는다는 가정.)
+    // "수급 0"과 "수급 데이터 없음"을 여기서도 구분한다(types.ts의 coverage
+    // 문서 주석이 이름 붙인 바로 그 오염 — 5단계 개인 열에서 겪은 것과 같다).
+    // 두 경우 모두 "0"이 아니라 "없음"으로 다뤄야 한다:
+    //   (a) sectorFlow20 === undefined — 이 섹터가 flows에 아예 없다(종목이
+    //       유니버스에는 있지만 수급 데이터를 하나도 못 받았다).
+    //   (b) sectorFlow20.tradingDays === 0 — sectorTotals가 asOf 이전 날짜를
+    //       하나도 못 찾아 foreign/institution/other를 전부 0으로 채운
+    //       상태다. 이 0은 "수급이 없었다"가 아니라 "그 시점 이전 데이터
+    //       자체가 없다"는 뜻이라 액면 그대로 믿으면 안 된다.
+    // 둘 다 최소 "partial"로 낮춘다(섹터 매핑 자체가 없는 "none"과는 다르다).
+    const noSectorFlowData = sectorFlow20 === undefined || sectorFlow20.tradingDays === 0;
     const coverage: JournalSnapshot["coverage"] =
-      sectorRsRank === undefined || rsi14 === undefined ? "partial" : "full";
+      sectorRsRank === undefined || rsi14 === undefined || noSectorFlowData ? "partial" : "full";
 
     return {
       asOf,
