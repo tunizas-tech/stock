@@ -14,6 +14,8 @@ import {
   fmtDate,
   fmtMoney,
 } from "@/lib/format";
+import { detectStorageMode, type StorageMode } from "@/lib/storage-mode";
+import { importJournalEntries } from "@/lib/journal-client";
 import type { JournalAction, JournalEntry } from "@/lib/types";
 
 const ACTION_LABEL: Record<JournalAction, string> = {
@@ -34,6 +36,10 @@ const ACTION_STYLE: Record<JournalAction, string> = {
 export default function JournalPage() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  // 서버 전환 직후 이 브라우저에만 남은 기록을 한 번 올리는 이관 카드용 상태.
+  const [mode, setMode] = useState<StorageMode>("local");
+  const [localLeft, setLocalLeft] = useState<JournalEntry[]>([]);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
 
   async function refresh() {
     setEntries(await db.listJournal());
@@ -44,9 +50,28 @@ export default function JournalPage() {
     refresh();
   }, []);
 
+  useEffect(() => {
+    detectStorageMode().then((m) => {
+      setMode(m);
+      if (m === "server") setLocalLeft(db.localJournalForImport());
+    });
+  }, []);
+
   async function handleAdd(draft: Omit<JournalEntry, "id">) {
     await db.addJournal(draft);
     await refresh();
+  }
+
+  async function handleImport() {
+    try {
+      const r = await importJournalEntries(localLeft);
+      db.clearLocalJournal();
+      setLocalLeft([]);
+      setImportMsg(`${r.inserted}건 올림, ${r.skipped}건은 이미 있어 건너뜀`);
+      await refresh();
+    } catch (e) {
+      setImportMsg(e instanceof Error ? e.message : "이관 실패");
+    }
   }
 
   async function handleDelete(id: string) {
@@ -66,6 +91,24 @@ export default function JournalPage() {
           자기검증 →
         </Link>
       </PageHeader>
+
+      {mode === "server" && localLeft.length > 0 && (
+        <div className="mb-6 rounded-xl2 border border-accent/40 bg-surface p-4 text-sm">
+          <p className="text-ink">
+            이 브라우저에 남아 있는 기록 <b>{localLeft.length}건</b>이 서버에 없습니다.
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            한 번 올리면 이 브라우저의 사본은 비웁니다. 같은 기록은 두 번 들어가지 않습니다.
+          </p>
+          <button
+            onClick={handleImport}
+            className="mt-3 rounded-md border border-accent px-3 py-1.5 text-xs text-accent hover:bg-accent/10"
+          >
+            서버로 올리기
+          </button>
+        </div>
+      )}
+      {importMsg && <p className="mb-4 text-xs text-muted">{importMsg}</p>}
 
       <div className="mb-6">
         <JournalEntryForm onSubmit={handleAdd} />
