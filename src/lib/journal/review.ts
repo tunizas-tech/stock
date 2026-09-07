@@ -217,6 +217,9 @@ export function forwardReturn(
   roundTrip: number,
   includeSameDay = false
 ): number | undefined {
+  // fromDate가 시리즈 시작보다 이르면 findIndex가 인덱스 0에 걸려 실제보다
+  // 짧은 창을 몰래 계산한다(tradingDayIndex와 같은 가드 — M3).
+  if (closes.length === 0 || fromDate < closes[0].date) return undefined;
   const entryIdx = closes.findIndex((c) => (includeSameDay ? c.date >= fromDate : c.date > fromDate));
   if (entryIdx < 0) return undefined;
   const exitIdx = entryIdx + horizonDays;
@@ -460,11 +463,20 @@ export function groupByHoldBucket(
   });
 }
 
+/**
+ * `n`(관망 전체 수) · `pairedN`(그중 KOSPI까지 짝지어져 `delta`의 분모가 된 수) ·
+ * `cfMean20`(그 자체 표본 수는 n 이하)은 서로 다른 모집단에서 나올 수 있다(I2) —
+ * KOSPI 시세가 일부 관망에서만 살아 있으면 cfMean20은 n건 평균인데 delta는
+ * pairedN건 평균끼리의 차이가 된다. `pairedN`을 항상 내는 이유는 이 차이를
+ * 화면이 숨기지 않게 하기 위해서다(KOSPI가 아예 없으면 0).
+ */
 export interface SkipStat {
   n: number;
   cfMean20?: number;
   kospiMean20?: number;
   delta?: number;
+  /** delta·kospiMean20의 실제 모집단 크기 — KOSPI가 없으면 항상 0. */
+  pairedN: number;
   insufficient: boolean;
 }
 
@@ -500,7 +512,7 @@ export function skipCounterfactual(
   }
   const stat = (b: typeof acc.user): SkipStat => {
     const n = b.cf.length;
-    const s: SkipStat = { n, insufficient: n < MIN_SAMPLE };
+    const s: SkipStat = { n, pairedN: b.pairs.length, insufficient: n < MIN_SAMPLE };
     if (n > 0) s.cfMean20 = avg(b.cf);
     if (b.pairs.length > 0) {
       s.kospiMean20 = avg(b.pairs.map((p) => p[1]));

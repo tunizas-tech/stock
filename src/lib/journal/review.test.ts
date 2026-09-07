@@ -286,7 +286,7 @@ describe("skipCounterfactual — N3", () => {
 
   it("skip 데이터가 없으면 n=0, insufficient=true, cfMean20 undefined", () => {
     const result = skipCounterfactual([], () => undefined, 0);
-    expect(result.user).toEqual({ n: 0, cfMean20: undefined, insufficient: true });
+    expect(result.user).toEqual({ n: 0, pairedN: 0, cfMean20: undefined, insufficient: true });
     expect(MIN_SAMPLE).toBe(20);
   });
 });
@@ -301,6 +301,11 @@ describe("forwardReturn includeSameDay", () => {
   it("includeSameDay면 그날 종가 진입(>= fromDate)", () => {
     expect(forwardReturn(closes, "2026-09-08", 1, 0, true)).toBeCloseTo(0.1, 6);  // 110→121
     expect(forwardReturn(closes, "2026-09-08", 1, 0)).toBeUndefined();            // 121 다음이 없다
+  });
+  // M3: fromDate가 시리즈 시작 이전이면 findIndex가 인덱스 0에 걸려 실제보다
+  // 짧은 창을 몰래 계산해 버린다 — 시리즈 밖은 조용히 undefined여야 한다.
+  it("fromDate가 시리즈 시작보다 이르면 undefined(창을 몰래 줄이지 않는다)", () => {
+    expect(forwardReturn(closes, "2026-09-06", 1, 0)).toBeUndefined();
   });
 });
 
@@ -340,6 +345,42 @@ describe("skipCounterfactual — author 분리·KOSPI 대조", () => {
     expect(r.user.cfMean20).toBeDefined();
     expect(r.user.kospiMean20).toBeUndefined();
     expect(r.user.delta).toBeUndefined();
+    expect(r.user.pairedN).toBe(0); // I2: KOSPI가 아예 없으면 짝지은 표본도 0
+  });
+
+  // I2: n(전체 관망 수)·pairedN(KOSPI까지 짝지어진 수)·cfMean20의 모집단이
+  // 서로 다를 수 있다 — pairedN이 없으면 화면이 delta의 진짜 표본 수를 숨긴다.
+  it("일부 관망만 KOSPI 창이 살아 있으면 pairedN이 그 수를 드러내고, delta는 cfMean20-kospiMean20과 다를 수 있다", () => {
+    const longCloses = Array.from({ length: 50 }, (_, i) => ({
+      date: `2026-01-${String(i + 1).padStart(2, "0")}`,
+      close: 100 + i,
+    }));
+    // KOSPI는 25일치뿐 — 늦게 진입하는 관망은 +20일 창이 이 시리즈 밖으로 나간다.
+    const shortKospi = Array.from({ length: 25 }, (_, i) => ({
+      date: `2026-01-${String(i + 1).padStart(2, "0")}`,
+      close: 1000 + i * 5,
+    }));
+    // skip1(01-01): 진입 01-02(101)→20일 뒤 01-22(121). KOSPI도 01-02(1005)→01-22(1105)가 있다 → 짝이 잡힌다.
+    // skip2(01-10): 진입 01-11(110)→20일 뒤 01-31(130). KOSPI는 25일치뿐이라 01-31 자리가 없다 → 짝이 안 잡힌다.
+    const r = skipCounterfactual(
+      [skip({ date: "2026-01-01" }), skip({ date: "2026-01-10" })],
+      () => longCloses,
+      0,
+      shortKospi
+    );
+    const cf1 = 121 / 101 - 1;
+    const cf2 = 130 / 110 - 1;
+    const kospi1 = 1105 / 1005 - 1;
+    expect(r.user.n).toBe(2);
+    expect(r.user.pairedN).toBe(1);
+    expect(r.user.cfMean20).toBeDefined();
+    expect(r.user.kospiMean20).toBeDefined();
+    expect(r.user.delta).toBeDefined();
+    expect(r.user.cfMean20).toBeCloseTo((cf1 + cf2) / 2, 6);
+    expect(r.user.kospiMean20).toBeCloseTo(kospi1, 6);
+    expect(r.user.delta).toBeCloseTo(cf1 - kospi1, 6);
+    // n(2)과 pairedN(1)이 갈리므로, delta는 cfMean20(2건 평균) - kospiMean20(1건)과 같지 않다.
+    expect(r.user.delta).not.toBeCloseTo(r.user.cfMean20! - r.user.kospiMean20!, 6);
   });
 });
 
