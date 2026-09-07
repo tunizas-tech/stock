@@ -42,14 +42,19 @@ export async function deleteJournalEntry(id: string): Promise<void> {
   if (!res.ok) return fail(res);
 }
 
-export async function importJournalEntries(
-  entries: JournalEntry[]
-): Promise<{ inserted: number; skipped: number }> {
+/** 이관 결과. `rejected`는 형식에서 벗어나 건너뛴 행 — 나머지는 그대로 들어간다(I-6). */
+export interface ImportResult {
+  inserted: number;
+  skipped: number;
+  rejected: { index: number; id?: unknown; field: string; error: string }[];
+}
+
+export async function importJournalEntries(entries: JournalEntry[]): Promise<ImportResult> {
   const res = await fetch("/api/journal/import", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ entries }),
   });
   if (!res.ok) return fail(res);
-  return (await res.json()) as { inserted: number; skipped: number };
+  return (await res.json()) as ImportResult;
 }

@@ -70,7 +70,7 @@ create index if not exists journal_agent_day_idx on journal (date, ticker) where
 
 | 메서드·경로 | 동작 |
 |---|---|
-| `GET /api/journal/mode` | `{ mode: "server" }` / 503 |
+| `GET /api/journal/mode` | 항상 200 `{ mode: "server" \| "local" }` — `DATABASE_URL` 없음은 오류가 아니라 `local`이라는 답이다(클라이언트가 "실패"와 구분해야 한다) |
 | `GET /api/journal` | 전체 목록, `date desc, "createdAt" desc` |
 | `POST /api/journal` | 폼 초안(`Omit<JournalEntry,"id">`) 저장. 서버가 `id`(기존 `newId()` 규칙), `author:"user"`, `createdAt`(없으면 now) 채움. 6단계 규칙(주 이유 필수 등)은 폼이 이미 강제하므로 여기선 타입·enum 검증만 |
 | `PATCH /api/journal/[id]` | `{ lesson }`만 |

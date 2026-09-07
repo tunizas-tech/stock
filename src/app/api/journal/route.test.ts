@@ -34,9 +34,13 @@ describe("mode", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ mode: "server" });
   });
-  it("풀이 없으면 503", async () => {
+  // 로컬 개발은 DATABASE_URL이 없는 정상 상태다 — 503으로 답하면 브라우저 콘솔에
+  // 매번 빨간 줄이 남고, 클라이언트도 "실패"와 "local이라는 답"을 구분하지 못한다.
+  it("풀이 없으면 200 + local", async () => {
     state.pool = null;
-    expect((await MODE()).status).toBe(503);
+    const res = await MODE();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ mode: "local" });
   });
 });
 
@@ -66,6 +70,15 @@ describe("POST /api/journal", () => {
     await POST(req("POST", "/api/journal", { ...draft, author: "agent" }));
     const params = state.pool!.query.mock.calls[0][1] as unknown[];
     expect(params[15]).toBe("user");
+  });
+  // I-4: 클라이언트가 준 createdAt을 그대로 쓰면 봉인 기준일(첫 createdAt)을 과거로
+  // 밀어 봉인을 열 수 있고, 거래일 종가 이전 시각을 보내 "당일 종가 진입"을 만들 수도
+  // 있다. 폼은 늘 now를 보내므로 이 문에서 통과시킬 이유가 없다(이관 문만 받는다).
+  it("createdAt을 보내도 서버 시각으로 덮어쓴다", async () => {
+    await POST(req("POST", "/api/journal", { ...draft, createdAt: "2020-01-01T00:00:00.000Z" }));
+    const params = state.pool!.query.mock.calls[0][1] as unknown[];
+    expect(params[14]).not.toBe("2020-01-01T00:00:00.000Z");
+    expect(Date.parse(params[14] as string)).toBeGreaterThan(Date.parse("2025-01-01T00:00:00.000Z"));
   });
   it("emotion 6은 400 + field", async () => {
     const res = await POST(req("POST", "/api/journal", { ...draft, emotion: 6 }));
@@ -98,9 +111,31 @@ describe("POST /api/journal/import", () => {
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })
       .mockResolvedValueOnce({ rows: [], rowCount: 0 });
     const res = await IMPORT(req("POST", "/api/journal/import", { entries: [{ ...ROW, id: "x1", createdAt: undefined }, { ...ROW, id: "x2" }] }));
-    expect(await res.json()).toEqual({ inserted: 1, skipped: 1 });
+    expect(await res.json()).toEqual({ inserted: 1, skipped: 1, rejected: [] });
   });
   it("entries가 배열이 아니면 400", async () => {
     expect((await IMPORT(req("POST", "/api/journal/import", { entries: "no" }))).status).toBe(400);
+  });
+  // M-8: 이관 문은 Basic Auth 뒤이지만 author를 본문에서 받지 않는다는 것이 이 갈래의
+  // 가장 강한 불변식이다 — 사람이 올린 행이 에이전트 관망 채점에 섞이면 안 된다.
+  it("author=agent를 실어 보내도 user로 저장한다", async () => {
+    await IMPORT(req("POST", "/api/journal/import", { entries: [{ ...ROW, id: "x1", author: "agent" }] }));
+    const params = state.pool!.query.mock.calls[0][1] as unknown[];
+    expect(params[15]).toBe("user");
+  });
+  // I-6: 한 행이 형식에서 벗어났다고 전체 이관을 막으면, localStorage를 고칠 UI가
+  // 없는 사용자에겐 이관 경로가 영영 닫힌다. 통과한 것만 넣고 나머지는 알려준다.
+  it("깨진 행은 건너뛰고 rejected로 알린다", async () => {
+    state.pool!.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    const res = await IMPORT(
+      req("POST", "/api/journal/import", {
+        entries: [{ ...ROW, id: "ok1" }, { ...ROW, id: "bad1", emotion: 6 }],
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.inserted).toBe(1);
+    expect(body.rejected).toHaveLength(1);
+    expect(body.rejected[0]).toMatchObject({ index: 1, id: "bad1", field: "emotion" });
   });
 });

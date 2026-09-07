@@ -24,7 +24,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     ...parsed.value,
     id: crypto.randomUUID(),
     author: "user",
-    createdAt: parsed.value.createdAt ?? new Date().toISOString(),
+    // createdAt은 본문 값을 절대 쓰지 않고 서버 시각으로 못 박는다. 폼은 언제나 now를
+    // 보내므로 잃는 기능이 없고, 통과시키면 두 가지가 뚫린다: (1) 거래일 종가 이전
+    // 시각을 보내 "그날 종가 진입"(이미 아는 종가)을 만들 수 있고, (2) 과거 시각이
+    // 봉인 기준일(첫 createdAt)을 뒤로 밀어 자기검증 봉인이 열린다.
+    // 옛 기록 이관은 id까지 유지해야 하므로 /api/journal/import만 createdAt을 받는다.
+    createdAt: new Date().toISOString(),
   });
   return NextResponse.json(entry, { status: 201 });
 }
