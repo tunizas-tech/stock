@@ -407,4 +407,35 @@ describe("until 옵션 — 매매일 전 거래일까지만 집계(C1 가드)", 
     const withUntilAtLastDate = aggregateBySector([untilFixture], "필터섹터", "2025-09-03");
     expect(withUntilAtLastDate).toEqual(withoutUntil);
   });
+
+  // 1단계 태스크 2에서 미룬 항목(F) — "최근 days일"이 저장된 마지막 days개
+  // 날짜가 아니라 until 이하 날짜 중 최근 days개여야 한다는 걸 못박는다.
+  // 날짜 5개(09-01~09-05) 중 09-04·09-05는 until("2025-09-03") 이후이고,
+  // until 이하 날짜는 3개(09-01~09-03)라 days=2 < 3 조건을 만족한다 — 만약
+  // 구현이 "저장 배열의 마지막 days개"를 먼저 자르고 나서 until로 걸렀다면
+  // (필터 전 슬라이스), 09-04·09-05가 선택돼 버렸을 것이다. 09-04·09-05에는
+  // 눈에 띄게 큰 값을 심어 그 잘못이 섞이면 합계가 확 달라지게 한다.
+  const filterBeforeSliceFixture: StockFlow = {
+    ticker: "U2",
+    name: "유틸전자2",
+    sector: "필터섹터2",
+    days: [
+      { date: "2025-09-01", close: 1, foreign: 1, institution: 1, individual: -2, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+      { date: "2025-09-02", close: 1, foreign: 10, institution: 10, individual: -20, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+      { date: "2025-09-03", close: 1, foreign: 100, institution: 100, individual: -200, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+      // until("2025-09-03") 이후 — 걸러져야 한다. 저장 순서상으로는 "마지막
+      // days개"에 해당해 필터-후-슬라이스 순서가 깨지면 이 값이 새어 들어온다.
+      { date: "2025-09-04", close: 1, foreign: 1_000_000, institution: 1_000_000, individual: -2_000_000, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+      { date: "2025-09-05", close: 1, foreign: 10_000_000, institution: 10_000_000, individual: -20_000_000, foreignQty: 0, institutionQty: 0, individualQty: 0 },
+    ],
+  };
+
+  it("sectorTotals: 저장된 마지막 days개가 아니라 until 이하 날짜 중 최근 days개를 고른다(필터 후 슬라이스 순서 고정)", () => {
+    const [total] = sectorTotals([filterBeforeSliceFixture], 2, "2025-09-03");
+    // until 이하(09-01~09-03) 중 최근 2개 = 09-02, 09-03. 09-04·09-05가
+    // 섞였다면 foreign은 수백만~천만 단위로 튀었을 것이다.
+    expect(total.foreign).toBe(10 + 100);
+    expect(total.institution).toBe(10 + 100);
+    expect(total.tradingDays).toBe(2);
+  });
 });
