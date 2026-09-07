@@ -1,12 +1,21 @@
 // 저장소 파사드(디자인 §5.2-1). 페이지는 오직 db.* 만 호출한다.
-// 일지는 서버(`/api/journal`, Postgres) ↔ localStorage, 보유·관심은 Supabase ↔ localStorage(변경 없음).
-// - 설정 O: Supabase(Postgres) — 보유/관심만. 서버 감지 O — 일지는 `/api/journal`(Postgres)
-// - 설정 X: 브라우저 localStorage (+ 최초 1회 시드 주입)
+// 세 테이블 모두 서버(`/api/*`, Postgres) ↔ localStorage로 분기한다(8단계 Task 4 —
+// 보유·관심종목도 일지와 같은 detectStorageMode() 판단을 탄다. Supabase는 더는
+// 쓰지 않는다 — 제거는 Task 6).
+// - 서버 감지 O: `/api/holdings`·`/api/watchlist`·`/api/journal`(모두 Postgres)
+// - 서버 감지 X: 브라우저 localStorage (+ 최초 1회 시드 주입)
 
-import { supabase } from "./supabase";
 import { todayISO } from "./format";
 import { detectStorageMode } from "./storage-mode";
 import { deleteJournalEntry, fetchJournal, patchLesson, postJournal } from "./journal-client";
+import {
+  deleteHoldingEntry,
+  deleteWatchEntry,
+  fetchHoldings,
+  fetchWatch,
+  postHolding,
+  postWatch,
+} from "./portfolio-client";
 import type { Holding, JournalEntry, WatchItem } from "./types";
 
 const LS_KEYS = {
@@ -131,28 +140,13 @@ function newId(): string {
 export const db = {
   // ---- Holdings -----------------------------------------------------------
   async listHoldings(): Promise<Holding[]> {
-    if (supabase) {
-      const { data, error } = await supabase
-        .from("holdings")
-        .select("*")
-        .order("openedAt", { ascending: false });
-      if (error) throw error;
-      return (data as Holding[]) ?? [];
-    }
+    if ((await detectStorageMode()) === "server") return fetchHoldings();
     ensureSeed();
     return lsRead<Holding>(LS_KEYS.holdings);
   },
 
   async addHolding(input: Omit<Holding, "id">): Promise<Holding> {
-    if (supabase) {
-      const { data, error } = await supabase
-        .from("holdings")
-        .insert(input)
-        .select()
-        .single();
-      if (error) throw error;
-      return data as Holding;
-    }
+    if ((await detectStorageMode()) === "server") return postHolding(input);
     const row: Holding = { ...input, id: newId() };
     const rows = lsRead<Holding>(LS_KEYS.holdings);
     lsWrite(LS_KEYS.holdings, [row, ...rows]);
@@ -160,39 +154,20 @@ export const db = {
   },
 
   async removeHolding(id: string): Promise<void> {
-    if (supabase) {
-      const { error } = await supabase.from("holdings").delete().eq("id", id);
-      if (error) throw error;
-      return;
-    }
+    if ((await detectStorageMode()) === "server") return deleteHoldingEntry(id);
     const rows = lsRead<Holding>(LS_KEYS.holdings).filter((r) => r.id !== id);
     lsWrite(LS_KEYS.holdings, rows);
   },
 
   // ---- Watchlist ----------------------------------------------------------
   async listWatch(): Promise<WatchItem[]> {
-    if (supabase) {
-      const { data, error } = await supabase
-        .from("watchlist")
-        .select("*")
-        .order("addedAt", { ascending: false });
-      if (error) throw error;
-      return (data as WatchItem[]) ?? [];
-    }
+    if ((await detectStorageMode()) === "server") return fetchWatch();
     ensureSeed();
     return lsRead<WatchItem>(LS_KEYS.watchlist);
   },
 
   async addWatch(input: Omit<WatchItem, "id">): Promise<WatchItem> {
-    if (supabase) {
-      const { data, error } = await supabase
-        .from("watchlist")
-        .insert(input)
-        .select()
-        .single();
-      if (error) throw error;
-      return data as WatchItem;
-    }
+    if ((await detectStorageMode()) === "server") return postWatch(input);
     const row: WatchItem = { ...input, id: newId() };
     const rows = lsRead<WatchItem>(LS_KEYS.watchlist);
     lsWrite(LS_KEYS.watchlist, [row, ...rows]);
@@ -200,11 +175,7 @@ export const db = {
   },
 
   async removeWatch(id: string): Promise<void> {
-    if (supabase) {
-      const { error } = await supabase.from("watchlist").delete().eq("id", id);
-      if (error) throw error;
-      return;
-    }
+    if ((await detectStorageMode()) === "server") return deleteWatchEntry(id);
     const rows = lsRead<WatchItem>(LS_KEYS.watchlist).filter((r) => r.id !== id);
     lsWrite(LS_KEYS.watchlist, rows);
   },
@@ -264,6 +235,52 @@ export const db = {
   clearLocalJournal(): void {
     if (typeof window === "undefined") return;
     window.localStorage.removeItem(LS_KEYS.journal);
+  },
+
+  // ---- 보유·관심 이관 헬퍼(일지와 같은 모양 — 8단계 Task 4) ----------------
+
+  /** 이관 카드용 — 시드 2건은 사용자의 기록이 아니므로 뺀다. */
+  localHoldingsForImport(): Holding[] {
+    return lsRead<Holding>(LS_KEYS.holdings).filter(
+      (r) => !SEED_HOLDINGS.some((s) => s.id === r.id)
+    );
+  },
+
+  /**
+   * 이관에서 거절된 행만 남기고 나머지를 지운다. 전부 비우는 clearLocalHoldings와
+   * 나눠 둔 이유: 서버가 받지 않은 행까지 지우면 그 기록은 어디에도 남지 않는다.
+   */
+  replaceLocalHoldings(rows: Holding[]): void {
+    if (typeof window === "undefined") return;
+    lsWrite(LS_KEYS.holdings, rows);
+  },
+
+  /** 이관 완료 후 이 브라우저의 사본을 비운다(중복 이관 방지). */
+  clearLocalHoldings(): void {
+    if (typeof window === "undefined") return;
+    window.localStorage.removeItem(LS_KEYS.holdings);
+  },
+
+  /** 이관 카드용 — 시드 2건은 사용자의 기록이 아니므로 뺀다. */
+  localWatchForImport(): WatchItem[] {
+    return lsRead<WatchItem>(LS_KEYS.watchlist).filter(
+      (r) => !SEED_WATCH.some((s) => s.id === r.id)
+    );
+  },
+
+  /**
+   * 이관에서 거절된 행만 남기고 나머지를 지운다. 전부 비우는 clearLocalWatch와
+   * 나눠 둔 이유: 서버가 받지 않은 행까지 지우면 그 기록은 어디에도 남지 않는다.
+   */
+  replaceLocalWatch(rows: WatchItem[]): void {
+    if (typeof window === "undefined") return;
+    lsWrite(LS_KEYS.watchlist, rows);
+  },
+
+  /** 이관 완료 후 이 브라우저의 사본을 비운다(중복 이관 방지). */
+  clearLocalWatch(): void {
+    if (typeof window === "undefined") return;
+    window.localStorage.removeItem(LS_KEYS.watchlist);
   },
 };
 

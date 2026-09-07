@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 describe("detectStorageMode", () => {
-  it("/api/journal/mode가 200이면 server, 한 번만 부른다", async () => {
+  it("/api/storage/mode가 200이면 server, 한 번만 부른다", async () => {
     const f = vi.fn(async () => new Response(JSON.stringify({ mode: "server" }), { status: 200 }));
     expect(await detectStorageMode(f as unknown as typeof fetch)).toBe("server");
     expect(await detectStorageMode(f as unknown as typeof fetch)).toBe("server");

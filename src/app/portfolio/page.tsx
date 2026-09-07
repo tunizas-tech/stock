@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/PageHeader";
 import { MarketBadge } from "@/components/MarketBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { ChartModal } from "@/components/ChartModal";
+import { ImportCard } from "@/components/ImportCard";
+import { HoldingForm } from "@/components/HoldingForm";
 import { db } from "@/lib/data";
 import { getQuotes, quoteKey } from "@/lib/quotes";
 import {
@@ -16,9 +18,18 @@ import {
   fmtSignedMoney,
   pnlClass,
 } from "@/lib/format";
+import { detectStorageMode, type StorageMode } from "@/lib/storage-mode";
+import { importHoldingRows, importWatchRows } from "@/lib/portfolio-client";
+import { splitImportResult } from "@/lib/import-split";
 import type { Holding, Market, Quote, WatchItem } from "@/lib/types";
 
 type ChartTarget = { market: Market; ticker: string; name: string };
+
+// 서버 모드에서 목록 읽기가 네트워크 호출이 된 뒤(8단계 Task 4)로 실패를
+// 삼키면 setLoading(false)가 영원히 안 돌아 "불러오는 중…"에 갇힌다(스키마
+// 미적용 배포에서 실제로 그렇다) — 일지 페이지와 같은 문구.
+const LOAD_ERROR =
+  "서버에서 보유·관심종목을 불러오지 못했습니다 — DATABASE_URL·db/portfolio-schema.sql을 적용했는지 확인하세요.";
 
 export default function PortfolioPage() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
@@ -26,32 +37,114 @@ export default function PortfolioPage() {
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [loading, setLoading] = useState(true);
   const [chart, setChart] = useState<ChartTarget | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // 서버 전환 직후 이 브라우저에만 남은 보유·관심을 한 번 올리는 이관 카드용 상태.
+  const [mode, setMode] = useState<StorageMode>("local");
+  const [localH, setLocalH] = useState<Holding[]>([]);
+  const [localW, setLocalW] = useState<WatchItem[]>([]);
+  // 보유·관심 이관 결과를 하나로 합치면(구 importMsg) 관심종목 카드에서 올린
+  // 결과가 위쪽 보유 종목 섹션에 뜬다 — 카드별로 분리해 각자 자기 카드 밑에 뜨게 한다.
+  const [importMsgH, setImportMsgH] = useState<string | null>(null);
+  const [importMsgW, setImportMsgW] = useState<string | null>(null);
 
   async function refresh() {
-    const [h, w] = await Promise.all([db.listHoldings(), db.listWatch()]);
-    setHoldings(h);
-    setWatch(w);
-    const q = await getQuotes([
-      ...h.map((x) => ({ ticker: x.ticker, market: x.market })),
-      ...w.map((x) => ({ ticker: x.ticker, market: x.market })),
-    ]);
-    setQuotes(q);
-    setLoading(false);
+    try {
+      const [h, w] = await Promise.all([db.listHoldings(), db.listWatch()]);
+      setHoldings(h);
+      setWatch(w);
+      const q = await getQuotes([
+        ...h.map((x) => ({ ticker: x.ticker, market: x.market })),
+        ...w.map((x) => ({ ticker: x.ticker, market: x.market })),
+      ]);
+      setQuotes(q);
+      setError(null);
+    } catch {
+      setError(LOAD_ERROR);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     refresh();
   }, []);
 
+  useEffect(() => {
+    detectStorageMode().then((m) => {
+      setMode(m);
+      if (m === "server") {
+        setLocalH(db.localHoldingsForImport());
+        setLocalW(db.localWatchForImport());
+      }
+    });
+  }, []);
+
+  async function handleAddHolding(draft: Omit<Holding, "id">) {
+    try {
+      await db.addHolding(draft);
+      await refresh();
+    } catch (e) {
+      // 폼은 이 예외를 받아 초안을 지키기만 한다 — 문구는 여기서만 보여준다.
+      setError(e instanceof Error ? e.message : "추가 실패");
+      throw e;
+    }
+  }
+
+  async function importHoldings() {
+    try {
+      const r = await importHoldingRows(localH);
+      // 서버가 받지 않은 행(rejected)까지 지우면 그 기록은 어디에도 남지
+      // 않는다 — 무엇을 남길지는 순수 함수(splitImportResult)에 두고 테스트로
+      // 못 박는다.
+      const { keep, message } = splitImportResult(localH, r);
+      if (keep.length === 0) db.clearLocalHoldings();
+      else db.replaceLocalHoldings(keep);
+      setLocalH(keep);
+      setImportMsgH(message);
+      await refresh();
+    } catch (e) {
+      setImportMsgH(e instanceof Error ? e.message : "이관 실패");
+    }
+  }
+
+  async function importWatch() {
+    try {
+      const r = await importWatchRows(localW);
+      const { keep, message } = splitImportResult(localW, r);
+      if (keep.length === 0) db.clearLocalWatch();
+      else db.replaceLocalWatch(keep);
+      setLocalW(keep);
+      setImportMsgW(message);
+      await refresh();
+    } catch (e) {
+      setImportMsgW(e instanceof Error ? e.message : "이관 실패");
+    }
+  }
+
   return (
     <div>
       <PageHeader kicker="portfolio" title="포트폴리오" />
+
+      {error && <p className="mb-4 text-xs text-loss">{error}</p>}
 
       {/* ---- 보유 종목 ---- */}
       <section className="mb-10">
         <h2 className="mb-3 font-serif text-xl font-semibold text-ink">
           보유 종목
         </h2>
+
+        <ImportCard
+          label="보유종목"
+          rows={mode === "server" ? localH : []}
+          seedNote="예시 데이터(삼성전자·Apple)는 올리지 않습니다 — 실제 보유면 직접 추가하세요."
+          onImport={importHoldings}
+        />
+        {importMsgH && <p className="mb-4 text-xs text-muted">{importMsgH}</p>}
+
+        <div className="mb-6">
+          <HoldingForm onSubmit={handleAddHolding} />
+        </div>
+
         {loading ? (
           <p className="text-sm text-muted">불러오는 중…</p>
         ) : holdings.length === 0 ? (
@@ -65,8 +158,12 @@ export default function PortfolioPage() {
             quotes={quotes}
             onOpenChart={setChart}
             onRemove={async (id) => {
-              await db.removeHolding(id);
-              await refresh();
+              try {
+                await db.removeHolding(id);
+                await refresh();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "삭제 실패");
+              }
             }}
           />
         )}
@@ -77,6 +174,15 @@ export default function PortfolioPage() {
         <h2 className="mb-3 font-serif text-xl font-semibold text-ink">
           관심 종목
         </h2>
+
+        <ImportCard
+          label="관심종목"
+          rows={mode === "server" ? localW : []}
+          seedNote="예시 데이터(NAVER·NVIDIA)는 올리지 않습니다 — 실제 관심 종목이면 직접 추가하세요."
+          onImport={importWatch}
+        />
+        {importMsgW && <p className="mb-4 text-xs text-muted">{importMsgW}</p>}
+
         {loading ? (
           <p className="text-sm text-muted">불러오는 중…</p>
         ) : watch.length === 0 ? (
@@ -93,8 +199,12 @@ export default function PortfolioPage() {
                 quote={quotes[quoteKey(w.market, w.ticker)]}
                 onOpenChart={setChart}
                 onRemove={async () => {
-                  await db.removeWatch(w.id);
-                  await refresh();
+                  try {
+                    await db.removeWatch(w.id);
+                    await refresh();
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "삭제 실패");
+                  }
                 }}
               />
             ))}

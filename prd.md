@@ -93,14 +93,14 @@ journal     (id, date, market, ticker, name, action[buy/sell/note],
 price_cache (ticker, market, date, close, ...)   -- 예정: 호출 절감 + 복기
 ```
 
-저장은 이중 모드: 환경변수(Supabase)가 있으면 Postgres, 없으면 브라우저 localStorage. 페이지는 단일 데이터 API(`db.*`)만 호출한다.
+저장은 이중 모드: 서버에 `DATABASE_URL`이 설정돼 있으면 Coolify Postgres, 없으면 브라우저 localStorage. 페이지는 단일 데이터 API(`db.*`)만 호출한다.
 
 ## 9. 기술 스택
 
 - **프론트/풀스택**: Next.js 14 (App Router), TypeScript
 - **스타일**: Tailwind CSS, CSS 변수 기반 토큰
 - **차트**: recharts
-- **저장소**: Supabase (Postgres + Auth) — 선택, 미설정 시 localStorage 폴백
+- **저장소**: Coolify Postgres(`DATABASE_URL`) — 선택, 미설정 시 localStorage 폴백
 - **배포**: Vercel
 - **데이터 API(모듈 A)**: KIS Developers / Finnhub (서버 라우트 프록시)
 
@@ -114,7 +114,7 @@ price_cache (ticker, market, date, close, ...)   -- 예정: 호출 절감 + 복�
 | **D** | 스크리너 필터 로직 + 결과 테이블 | ✅ 완료 (유니버스: 내장 대표 + 보유 + 관심) |
 | **차트** | 지수·종목 일/주/월봉 (대시보드 + 포트폴리오 모달, KIS 기간별시세) | ✅ 완료 |
 | **E** | 매매일지 분석: 확신도-손익 상관, 월별 회고 | ⏭ 다음 |
-| **F** | (선택) Supabase Auth + RLS로 멀티기기/멀티유저 | 백로그 |
+| **F** | (선택) 인증 계층 추가 + `user_id` 컬럼으로 멀티기기/멀티유저 | 백로그 |
 
 ## 11. 성공 기준
 

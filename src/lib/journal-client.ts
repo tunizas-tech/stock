@@ -1,5 +1,9 @@
 // 서버 모드에서 data.ts가 쓰는 얇은 HTTP 클라이언트. 실패는 Error로 던진다 — 폼이 잡아 표시한다.
 import type { JournalEntry } from "./types";
+// ImportResult는 이제 ./import-split에서 공용으로 관리한다(보유·관심종목과 공유) —
+// 기존 import 경로(@/lib/journal-client)를 쓰는 곳이 있을 수 있어 재export한다.
+import type { ImportResult } from "./import-split";
+export type { ImportResult };
 
 async function fail(res: Response): Promise<never> {
   let msg = `HTTP ${res.status}`;
@@ -40,13 +44,6 @@ export async function patchLesson(id: string, lesson: string): Promise<void> {
 export async function deleteJournalEntry(id: string): Promise<void> {
   const res = await fetch(`/api/journal/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!res.ok) return fail(res);
-}
-
-/** 이관 결과. `rejected`는 형식에서 벗어나 건너뛴 행 — 나머지는 그대로 들어간다(I-6). */
-export interface ImportResult {
-  inserted: number;
-  skipped: number;
-  rejected: { index: number; id?: unknown; field: string; error: string }[];
 }
 
 export async function importJournalEntries(entries: JournalEntry[]): Promise<ImportResult> {

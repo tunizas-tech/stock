@@ -6,30 +6,33 @@
 
 | 결정 | 선택 | 이유 |
 |---|---|---|
-| 매매일지 저장소 | **Coolify Postgres** (`DATABASE_URL`, 뉴스와 공용. 없으면 브라우저 localStorage) | 7단계부터 매매일지는 서버 DB로 이동해 에이전트(Hermes)가 같은 문으로 쓸 수 있다 |
+| 저장소 | **Coolify Postgres** (`DATABASE_URL`. 뉴스·매매일지·보유관심종목 세 테이블 모두 Coolify Postgres. 없으면 매매일지·보유관심종목은 브라우저 localStorage) | 8단계부터 세 테이블 모두 Coolify Postgres로 통일돼 에이전트(Hermes)도 같은 문으로 쓸 수 있다. Supabase는 더는 쓰지 않는다 |
 | 인증 | **Basic Auth** (`src/middleware.ts`) | `APP_USER`/`APP_PASS` 두 개로 앱 전체가 잠긴다. 없으면 로컬처럼 열림 |
 | 데이터 위치 | **볼륨 `/app/data`** | `data/`는 gitignore. 재배포해도 남아야 한다 |
 
 ## 1. Postgres 준비 (1회)
 
-Coolify에서 PostgreSQL 리소스 생성 → `db/news-schema.sql`, `db/journal-schema.sql`을 순서대로 1회 실행:
+Coolify에서 PostgreSQL 리소스 생성 → `db/news-schema.sql`, `db/journal-schema.sql`, `db/portfolio-schema.sql`을 순서대로 1회 실행:
 
 ```bash
 psql "$DATABASE_URL" -f db/news-schema.sql
 psql "$DATABASE_URL" -f db/journal-schema.sql
+psql "$DATABASE_URL" -f db/portfolio-schema.sql
 ```
 
-두 파일 모두 `create table if not exists`라 재배포·재실행해도 안전하다(멱등).
+세 파일 모두 `create table if not exists`라 재배포·재실행해도 안전하다(멱등).
 
 ```bash
 psql "$DATABASE_URL" -c '\d journal'   # 17개 컬럼이 보이면 성공
 ```
 
 **스키마를 앱 재배포보다 먼저 적용한다.** 순서를 뒤집으면 새 이미지가 없는 테이블을
-읽어 `/journal`이 "서버에서 기록을 불러오지 못했습니다" 한 줄만 보여준다(기록은
+읽어 `/journal`뿐 아니라 `/portfolio`·`/`도 "불러오지 못했습니다" 한 줄만 보여준다(기록은
 아무것도 잃지 않는다 — 스키마를 넣고 새로고침하면 그대로 돌아온다).
 
 ### Supabase에 매매일지 기록이 있었다면 — 재배포 **전에** 꺼낸다
+
+(7단계 배포 때 이미 처리했다면 건너뜀)
 
 7단계부터 앱은 Supabase의 `journal` 테이블을 **더 이상 읽지 않는다.** 데이터는
 Supabase에 그대로 남아 있지만 화면에서는 사라지고, **자동 이관 경로는 없다.**
@@ -59,12 +62,10 @@ select * from journal order by date;
 | `APP_PASS` | **예** | 긴 비밀번호. 이게 없으면 관측소·매매일지가 인터넷에 열린다 |
 | `KIS_APP_KEY` | 예 | KIS 앱키 |
 | `KIS_APP_SECRET` | 예 | KIS 시크릿 |
-| `DATABASE_URL` | **예** | Coolify Postgres 연결 문자열. 뉴스·매매일지가 공용으로 쓴다. 없으면 매매일지는 브라우저 localStorage로 떨어지고 `/news`는 안내 문구만 보인다 |
+| `DATABASE_URL` | **예** | Coolify Postgres 연결 문자열. 뉴스·매매일지·보유관심종목이 공용으로 쓴다. 없으면 매매일지·보유관심종목은 브라우저 localStorage로 떨어지고 `/news`는 안내 문구만 보인다 |
 | `AGENT_TOKEN` | 선택 | 있으면 `POST /api/journal/agent`·뉴스·관측소를 Bearer로 열어 Hermes가 쓴다. `openssl rand -hex 32` |
 | `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | 선택 | 뉴스용 |
 | `FINNHUB_API_KEY` | 선택 | 미국 종목 시세 폴백 |
-
-보유·관심종목에 Supabase를 계속 쓰려면 `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`도 남길 수 있다(`supabase/schema.sql` 참고). **매매일지는 7단계부터 Supabase를 읽지 않는다** — 거기 있던 일지 기록은 이 배포 후 화면에서 사라진다(데이터는 Supabase에 남는다). 옮기려면 위 §1의 추출 절차를 재배포 **전에** 밟는다.
 
 ### KIS 키에 대해
 
@@ -152,6 +153,16 @@ curl -s -o /dev/null -w '%{http_code}\n' \
   https://<도메인>/api/journal/agent -d '{}'                                      # → 400
 ```
 
+보유·관심종목이 Postgres로 붙었는지는 두 줄로 확인한다:
+
+```bash
+curl -s -u "$APP_USER:$APP_PASS" https://<도메인>/api/storage/mode              # → {"mode":"server"}
+curl -s -u "$APP_USER:$APP_PASS" https://<도메인>/api/holdings                  # → {"holdings":[]}
+```
+
+`{"mode":"local"}`이면 `DATABASE_URL`이 서버에 안 들어간 것이고, `/api/holdings`가
+503이면 스키마(`db/portfolio-schema.sql`)가 아직 안 들어간 것이다.
+
 첫 07:00 실행 뒤 로그에 `[5] 일지 종목 일봉 적재 / 대상 N종목`이 보여야 한다.
 `DATABASE_URL 없음, 건너뜀`이면 스크립트 쪽 환경변수가 빠진 것이고,
 `경고: 일지 종목 적재 건너뜀 — …`이면 스키마가 아직 안 들어간 것이다(이 단계는
@@ -171,9 +182,4 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 
 ## 다음에 만들 것
 
-6단계 자기검증(완료) · 7단계 에이전트 관망(완료). 매매일지가 그 순간의 관측소 상태를 같이 저장하고,
-Hermes가 매일 아침 남긴 "관망"이 180일 뒤 KOSPI와 비교된다. 시장 규칙은 여섯 번 검증해 전부 기각됐지만,
-**당신의 매매 습관은 검증 가능하고 그것이 실제로 수익을 바꾼다.**
-
-다음 후보: **보유·관심종목 Postgres 이전 + Supabase 제거.** 매매일지는 이미 옮겼으니, 남은 두 테이블마저
-옮기면 이 문서의 §1이 "Postgres 준비" 하나로 끝나고 `supabase/schema.sql`을 통째로 지울 수 있다.
+8단계 완료 — 다음 후보: 에이전트 확신도 채점, KOSPI 파일 캐시.

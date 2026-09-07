@@ -71,7 +71,7 @@
 
 | 컴포넌트 | 위치 | 역할 |
 |----------|------|------|
-| `Nav` | 상단 고정 | 4개 라우트 + 저장모드 배지(●supabase/○local) |
+| `Nav` | 상단 고정 | 4개 라우트 + 저장모드 배지(●server/○local) |
 | `PageHeader` | 페이지 상단 | kicker(모노 소문자) + 세리프 큰 제목 |
 | `MarketBadge` | 인라인 | KR(잉크) / US(테라코타) 구분 칩 |
 | `EmotionDots` | 일지 | 확신도 1~5를 점 5개로 |
@@ -104,10 +104,10 @@
             │ db.*, getQuotes()  만 호출
             ▼
  [ lib/data.ts   데이터 레이어 ]──┐
-            │                     │ 분기
-   Supabase 설정 O                Supabase 설정 X
+            │                     │ 분기(detectStorageMode() 프로브)
+      서버 감지 성공                 서버 감지 실패
             ▼                     ▼
-   Supabase(Postgres)        브라우저 localStorage
+   서버 API(Postgres)         브라우저 localStorage
                                   (시드 데이터 자동 주입)
 
  [ lib/quotes.ts  시세 어댑터 ] ── /api/quotes 프록시(KR: KIS, US: Finnhub) ── 키 없음/실패 시 mock 폴백
@@ -116,16 +116,16 @@
 ### 5.2 핵심 설계 결정
 
 **(1) 저장소 이중화 — 점진적 도입**
-`lib/data.ts`가 환경변수 유무로 Supabase ↔ localStorage를 자동 분기한다. 설치 직후엔 아무 설정 없이 동작(localStorage + 시드), 멀티기기가 필요해질 때만 `.env.local`에 키를 넣으면 영속 전환. 페이지 코드는 바뀌지 않는다 — `db` 파사드만 바라보기 때문.
+`lib/data.ts`가 서버의 `DATABASE_URL` 설정 여부(런타임 프로브 `detectStorageMode()`)로 서버 API ↔ localStorage를 자동 분기한다. 설치 직후엔 아무 설정 없이 동작(localStorage + 시드), 멀티기기가 필요해질 때만 `.env.local`에 `DATABASE_URL`을 넣으면 영속 전환. 페이지 코드는 바뀌지 않는다 — `db` 파사드만 바라보기 때문.
 
 **(2) 시세 어댑터 격리 — 교체 가능한 이음새**
 모든 시세 접근은 `lib/quotes.ts`의 `getQuote()` 한 함수를 통한다. 내부적으로 `/api/quotes` 서버 프록시를 호출하고(KR: KIS, US: Finnhub), 키가 없거나 실패하면 mock으로 폴백한다. 데이터 소스 변경의 폭발 반경은 여전히 서버 어댑터 파일로 갇혀 있다.
 
 **(3) 타입 단일 출처**
-`lib/types.ts`의 도메인 타입(`Holding`/`WatchItem`/`JournalEntry`/`Quote`)을 모든 레이어가 공유. Supabase 스키마(`supabase/schema.sql`)의 컬럼명도 이 타입과 일치(camelCase 컬럼은 따옴표).
+`lib/types.ts`의 도메인 타입(`Holding`/`WatchItem`/`JournalEntry`/`Quote`)을 모든 레이어가 공유. Postgres 스키마(`db/news-schema.sql`·`db/journal-schema.sql`·`db/portfolio-schema.sql`)의 컬럼명도 이 타입과 일치(camelCase 컬럼은 따옴표).
 
 **(4) 보안 경계**
-API 키는 절대 클라이언트로 내려가지 않는다. 모듈 A 연동 시 `app/api/quotes/route.ts`(서버)에서만 KIS/Finnhub를 호출하고, 클라이언트는 그 내부 라우트만 호출한다. `NEXT_PUBLIC_*` 접두사는 Supabase의 anon key처럼 공개 가능한 값에만 사용.
+API 키는 절대 클라이언트로 내려가지 않는다. 모듈 A 연동 시 `app/api/quotes/route.ts`(서버)에서만 KIS/Finnhub를 호출하고, 클라이언트는 그 내부 라우트만 호출한다. 저장모드도 `NEXT_PUBLIC_*` 접두사로 빌드에 굽지 않고 서버 프로브(`/api/storage/mode`)로 런타임에 묻는다 — 같은 이미지가 로컬·서버 어디서나 재빌드 없이 돈다.
 
 ### 5.3 디렉터리
 
@@ -137,14 +137,15 @@ src/
   lib/types.ts        도메인 타입(단일 출처)
   lib/data.ts         저장소 파사드(분기)
   lib/quotes.ts       시세 어댑터(모듈 A 이음새)
-  lib/supabase.ts     클라이언트(env 없으면 null)
+  lib/storage-mode.ts 저장모드 런타임 프로브(서버 감지)
+  lib/server/db.ts    PostgreSQL 풀(서버 전용, DATABASE_URL 없으면 null)
   lib/format.ts       통화·퍼센트·날짜·색상
-supabase/schema.sql   Postgres 스키마
+db/*.sql              Postgres 스키마(news/journal/portfolio 세 파일)
 ```
 
 ### 5.4 확장 시 고려
 
-- **멀티유저**: 각 테이블에 `user_id` 추가 → Supabase Auth + RLS(`auth.uid() = user_id`). 스키마 주석에 경로 명시됨.
+- **멀티유저**: 각 테이블에 `user_id` 추가 + 서버 라우트에서 직접 인증·세션 검사 후 필터(내장 RLS가 없으므로 애플리케이션 레이어 책임). 스키마 주석에 경로 명시됨.
 - **캐싱**: `price_cache` 테이블 + 일 1회 배치로 KIS 유량 절감, 동시에 과거 종가 기반 복기 가능.
 - **차트**: recharts로 보유 비중 도넛, 일지 확신도-손익 산점도.
 
