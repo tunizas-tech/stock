@@ -34,6 +34,11 @@ const FILTERS: RangeFilter[] = [
 
 type RangeInputs = Partial<Record<MetricKey, { min: string; max: string }>>;
 
+// 유니버스 조회가 서버 모드에서 보유·관심 목록까지 함께 부르므로(runScreen),
+// 실패 문구도 포트폴리오 페이지와 같은 원인·조치를 안내한다.
+const LOAD_ERROR =
+  "서버에서 보유·관심종목을 불러오지 못했습니다 — DATABASE_URL·db/portfolio-schema.sql을 적용했는지 확인하세요.";
+
 function toCriterion(v?: { min: string; max: string }): RangeCriterion {
   const parse = (s?: string) => {
     if (!s?.trim()) return undefined;
@@ -52,6 +57,10 @@ export default function ScreenerPage() {
   const [results, setResults] = useState<Fundamentals[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [watchedKeys, setWatchedKeys] = useState<Set<string>>(new Set());
+  // 유니버스 조회·관심종목 추가가 서버 모드에서 네트워크 호출이 된 뒤(8단계
+  // Task 4)로 실패를 삼키면 사용자는 버튼을 눌러도 아무 신호 없이 아무 일도
+  // 안 일어나는 화면을 본다.
+  const [error, setError] = useState<string | null>(null);
 
   function setInput(key: MetricKey, side: "min" | "max", value: string) {
     setInputs((s) => ({
@@ -84,20 +93,28 @@ export default function ScreenerPage() {
       for (const f of FILTERS) ranges[f.key] = toCriterion(inputs[f.key]);
       const selected = (["KR", "US"] as Market[]).filter((m) => markets[m]);
       setResults(applyFilters(Object.values(fundamentals), { markets: selected, ranges }));
+      setError(null);
+    } catch {
+      setError(LOAD_ERROR);
     } finally {
       setLoading(false);
     }
   }
 
   async function addToWatch(row: Fundamentals) {
-    await db.addWatch({
-      market: row.market,
-      ticker: row.ticker,
-      name: row.name,
-      memo: "스크리너에서 추가",
-      addedAt: todayISO(),
-    });
-    setWatchedKeys((s) => new Set(s).add(quoteKey(row.market, row.ticker)));
+    try {
+      await db.addWatch({
+        market: row.market,
+        ticker: row.ticker,
+        name: row.name,
+        memo: "스크리너에서 추가",
+        addedAt: todayISO(),
+      });
+      setWatchedKeys((s) => new Set(s).add(quoteKey(row.market, row.ticker)));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "관심종목 추가 실패");
+    }
   }
 
   return (
@@ -174,6 +191,8 @@ export default function ScreenerPage() {
           {loading ? "거르는 중…" : "종목 거르기"}
         </button>
       </div>
+
+      {error && <p className="mt-4 text-xs text-loss">{error}</p>}
 
       {/* 결과 테이블 */}
       <div className="mt-8">

@@ -10,6 +10,12 @@ import { INDICES } from "@/lib/indices";
 
 type Counts = { holdings: number; watch: number; journal: number };
 
+// 서버 모드에서 카운트 조회가 네트워크 호출이 된 뒤(8단계 Task 4)로 실패를
+// 삼키면 카운트가 계속 0으로 보여 "보유·관심·기록이 하나도 없다"는 거짓
+// 신호를 준다 — 다른 화면과 같은 원인·조치를 안내한다.
+const LOAD_ERROR =
+  "서버에서 보유·관심종목을 불러오지 못했습니다 — DATABASE_URL·db/portfolio-schema.sql을 적용했는지 확인하세요.";
+
 const MODULES = [
   {
     href: "/journal",
@@ -43,15 +49,21 @@ export default function DashboardPage() {
     watch: 0,
     journal: 0,
   });
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      const [h, w, j] = await Promise.all([
-        db.listHoldings(),
-        db.listWatch(),
-        db.listJournal(),
-      ]);
-      setCounts({ holdings: h.length, watch: w.length, journal: j.length });
+      try {
+        const [h, w, j] = await Promise.all([
+          db.listHoldings(),
+          db.listWatch(),
+          db.listJournal(),
+        ]);
+        setCounts({ holdings: h.length, watch: w.length, journal: j.length });
+        setError(null);
+      } catch {
+        setError(LOAD_ERROR);
+      }
     })();
   }, []);
 
@@ -100,10 +112,13 @@ export default function DashboardPage() {
 
       <IndexChartSection />
 
-      <div className="mt-8 grid grid-cols-3 gap-4">
-        <StatCard label="보유 종목" value={counts.holdings} />
-        <StatCard label="관심 종목" value={counts.watch} />
-        <StatCard label="일지 기록" value={counts.journal} />
+      <div className="mt-8">
+        {error && <p className="mb-4 text-xs text-loss">{error}</p>}
+        <div className="grid grid-cols-3 gap-4">
+          <StatCard label="보유 종목" value={counts.holdings} />
+          <StatCard label="관심 종목" value={counts.watch} />
+          <StatCard label="일지 기록" value={counts.journal} />
+        </div>
       </div>
     </div>
   );
