@@ -43,10 +43,19 @@ export default function JournalPage() {
   // 에이전트 기록 숨기기(8단계) — 사람 매매일지를 훑을 때 에이전트 관망이 섞여
   // 보이지 않게 한다. localStorage에만 두는 순수 화면 설정이라 서버 값과 무관하다.
   const [hideAgent, setHideAgent] = useState(false);
+  // 서버 모드에선 목록 읽기가 네트워크 호출이다 — 실패를 삼키면 setLoading(false)가
+  // 영원히 안 돌아 "불러오는 중…"에 갇힌다(스키마 미적용 배포에서 실제로 그렇다).
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    setEntries(await db.listJournal());
-    setLoading(false);
+    try {
+      setEntries(await db.listJournal());
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "알 수 없는 오류");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -88,7 +97,12 @@ export default function JournalPage() {
       const r = await importJournalEntries(localLeft);
       db.clearLocalJournal();
       setLocalLeft([]);
-      setImportMsg(`${r.inserted}건 올림, ${r.skipped}건은 이미 있어 건너뜀`);
+      // 못 올린 행이 있으면 숫자를 반드시 말한다 — "다 올라갔다"고 읽고 브라우저
+      // 사본을 지운 뒤에야 몇 건이 사라진 걸 알면 되돌릴 방법이 없다.
+      const rejected = r.rejected?.length
+        ? `, ${r.rejected.length}건은 형식이 맞지 않아 못 올림(${r.rejected[0].field})`
+        : "";
+      setImportMsg(`${r.inserted}건 올림, ${r.skipped}건은 이미 있어 건너뜀${rejected}`);
       await refresh();
     } catch (e) {
       setImportMsg(e instanceof Error ? e.message : "이관 실패");
@@ -147,10 +161,20 @@ export default function JournalPage() {
 
       {loading ? (
         <p className="text-sm text-muted">불러오는 중…</p>
-      ) : entries.length === 0 ? (
+      ) : error ? (
+        <p className="text-sm text-muted">
+          서버에서 기록을 불러오지 못했습니다 — DATABASE_URL·db/journal-schema.sql을 확인하세요. ({error})
+        </p>
+      ) : visible.length === 0 ? (
+        // M-4: 에이전트 기록만 있는 상태에서 숨기기를 켜면 entries는 비지 않지만
+        // 화면에는 아무것도 없다 — 빈 <ul>만 남기지 말고 토글을 짚어준다.
         <EmptyState
           title="아직 기록이 없습니다"
-          hint="첫 결정을 남겨보세요. 가격·수량 없이 메모만으로도 충분합니다."
+          hint={
+            hideAgent && agentCount > 0
+              ? `에이전트 기록 ${agentCount}건은 숨겨져 있습니다. 위 "에이전트 기록 보이기"를 누르면 다시 나옵니다.`
+              : "첫 결정을 남겨보세요. 가격·수량 없이 메모만으로도 충분합니다."
+          }
         />
       ) : (
         <ul className="space-y-4">
@@ -205,7 +229,9 @@ function JournalCard({
               에이전트
             </span>
           )}
-          {entry.primaryTag && (
+          {/* 에이전트 기록의 primaryTag는 항상 "에이전트"라 위 칩과 글자까지 같다 —
+              같은 말을 두 번 붙이지 않는다. 사람 기록은 그대로 주 이유를 보여준다. */}
+          {entry.author !== "agent" && entry.primaryTag && (
             <span className="inline-flex items-center rounded-md border border-line px-1.5 py-0.5 text-xs font-medium text-muted">
               {entry.primaryTag}
             </span>

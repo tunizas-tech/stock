@@ -12,7 +12,8 @@ import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { db } from "@/lib/data";
-import { fmtDate, fmtPct, pnlClass, todayISO } from "@/lib/format";
+import { fmtDate, fmtPct, pnlClass } from "@/lib/format";
+import { todayKst } from "@/lib/kst";
 import {
   DEFAULT_SETTINGS,
   isSealed,
@@ -71,11 +72,19 @@ export default function JournalReviewPage() {
   const [data, setData] = useState<ReviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [reviewError, setReviewError] = useState(false);
-  const today = todayISO();
+  // 봉인 비교는 브라우저 시간대가 아니라 KST로 한다(설계 §3.3) — 해외에서 열면
+  // todayISO()는 하루 어긋나 봉인이 하루 일찍/늦게 열린다.
+  const today = todayKst();
+  // 목록 읽기 실패를 삼키면 entries가 null로 남아 "불러오는 중…"이 영원히 걸린다.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      setEntries(await db.listJournal());
+      try {
+        setEntries(await db.listJournal());
+      } catch (e) {
+        setLoadError(e instanceof Error ? e.message : "알 수 없는 오류");
+      }
       setSettings(loadSettings());
     })();
   }, []);
@@ -127,7 +136,11 @@ export default function JournalReviewPage() {
     <div>
       <PageHeader kicker="journal · review" title="자기검증" />
 
-      {entries === null ? (
+      {loadError ? (
+        <p className="text-sm text-muted">
+          서버에서 기록을 불러오지 못했습니다 — DATABASE_URL·db/journal-schema.sql을 확인하세요. ({loadError})
+        </p>
+      ) : entries === null ? (
         <p className="text-sm text-muted">불러오는 중…</p>
       ) : sealed ? (
         <SealedView
@@ -140,8 +153,6 @@ export default function JournalReviewPage() {
         <p className="text-sm text-muted">계산 중…</p>
       ) : reviewError || !data ? (
         <EmptyState title="자기검증을 불러오지 못했습니다" hint="새로고침해 다시 시도하세요." />
-      ) : data.closedCount === 0 ? (
-        <EmptyState title="아직 짝지어진 거래가 없다 — 매수와 매도를 같은 종목으로 기록하면 여기 나타난다." />
       ) : (
         <ReviewSections data={data} />
       )}
@@ -420,8 +431,16 @@ function SkipRow({ label, s }: { label: string; s: SkipStat }) {
 }
 
 function ReviewSections({ data }: { data: ReviewResponse }) {
+  // 청산된 거래가 없어도 여기서 멈추지 않는다(I-5). 에이전트 기록은 전부 관망(skip)
+  // 이라, 청산 짝이 생길 때까지 절 전체를 가리면 7단계 채점 결과를 한 번도 못 본다 —
+  // 매수 후 1년을 들고 있는 사용자에게 그건 "영원히"와 같다. 빈 안내는 위에 두고,
+  // 관망 절과 가격 없는 종목 절은 그대로 아래에 렌더한다.
+  const noClosed = data.closedCount === 0;
   return (
     <div className="space-y-10">
+      {noClosed && (
+        <EmptyState title="아직 짝지어진 거래가 없다 — 매수와 매도를 같은 종목으로 기록하면 여기 나타난다." />
+      )}
       {/* 아직 안 판 포지션이 몇 건인지 먼저 알린다 — 아래 모든 숫자는 청산된
           거래만 센 값이라, 진행 중 포지션이 많으면 "지금까지의 성적"이 아니라
           "판 것들만의 성적"을 보고 있는 것이다(생존 편향의 사촌). */}

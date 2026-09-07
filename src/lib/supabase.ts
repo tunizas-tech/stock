@@ -8,5 +8,3 @@ const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 export const supabase: SupabaseClient | null =
   url && anonKey ? createClient(url, anonKey) : null;
-
-export const hasSupabase = Boolean(url && anonKey);
