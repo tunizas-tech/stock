@@ -5,7 +5,6 @@ const state = { pool: null as null | { query: ReturnType<typeof vi.fn> } };
 vi.mock("@/lib/server/db", () => ({ getPool: () => state.pool }));
 
 import { GET, POST } from "./route";
-import { GET as MODE } from "./mode/route";
 import { PATCH, DELETE } from "./[id]/route";
 import { POST as IMPORT } from "./import/route";
 
@@ -28,21 +27,8 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-describe("mode", () => {
-  it("풀이 있으면 server", async () => {
-    const res = await MODE();
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ mode: "server" });
-  });
-  // 로컬 개발은 DATABASE_URL이 없는 정상 상태다 — 503으로 답하면 브라우저 콘솔에
-  // 매번 빨간 줄이 남고, 클라이언트도 "실패"와 "local이라는 답"을 구분하지 못한다.
-  it("풀이 없으면 200 + local", async () => {
-    state.pool = null;
-    const res = await MODE();
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ mode: "local" });
-  });
-});
+// mode 케이스는 src/app/api/portfolio.test.ts로 옮겼다 — /api/journal/mode는
+// 이제 /api/storage/mode로 가는 307 리다이렉트이고, {mode} 200을 돌려주지 않는다.
 
 describe("GET /api/journal", () => {
   it("entries 배열을 돌려준다", async () => {
