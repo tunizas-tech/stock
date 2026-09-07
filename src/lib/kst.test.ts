@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { isAfterCloseKst, kstDate, todayKst } from "./kst";
+// scripts/lib/kst.mjs는 이 파일의 JS 이식본이다(스크립트는 TS를 import할 수 없다) —
+// 두 구현이 어긋나면 backtest-fetch.mjs의 날짜 판정이 앱과 하루 어긋난다.
+import { todayKst as mjsToday } from "../../scripts/lib/kst.mjs";
 
 describe("kstDate", () => {
   it("UTC 15:30은 KST 다음 날 00:30이다", () => {
@@ -16,6 +19,10 @@ describe("kstDate", () => {
 describe("todayKst", () => {
   it("now를 주입해 결정적으로 계산한다", () => {
     expect(todayKst(new Date("2026-09-07T16:00:00.000Z"))).toBe("2026-09-08");
+  });
+  it("scripts/lib/kst.mjs 이식본과 같은 값을 낸다", () => {
+    const now = new Date("2026-09-07T16:00:00.000Z");
+    expect(mjsToday(now)).toBe(todayKst(now));
   });
 });
 
