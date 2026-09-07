@@ -54,10 +54,16 @@ export function saveSettings(s: JournalSettings): void {
  *
  * `createdAt`이 있는 기록이 하나도 없으면 undefined — "아직 봉인이 시작되지
  * 않았다"는 뜻이고, 이 필드가 생기기 전의 옛 기록만 있는 경우도 여기 해당한다.
+ *
+ * 에이전트 기록(`author === "agent"`)은 제외한다 — 에이전트가 반년 써 둔 뒤
+ * 사용자가 첫 기록을 남기는 날 봉인이 바로 열리면 안 된다.
  */
-export function sealBaseDate(entries: readonly { createdAt?: string }[]): string | undefined {
+export function sealBaseDate(
+  entries: readonly { createdAt?: string; author?: string }[]
+): string | undefined {
   let min: string | undefined;
   for (const e of entries) {
+    if (e.author === "agent") continue;
     const c = e.createdAt;
     // ISO 8601(YYYY-MM-DD...)만 인정한다. 손상된 값이 최솟값으로 잡혀 봉인을
     // 영원히 걸어두거나 반대로 즉시 열어버리는 일을 막는다.

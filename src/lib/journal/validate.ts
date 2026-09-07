@@ -13,6 +13,18 @@ export const TICKER_RE = /^(\d{6}|[A-Z]{1,5})$/;
 /** YYYY-MM-DD. */
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// 매매 이유 태그(6단계 설계 §1, 7종 고정 + 7단계 "에이전트" 1종). 사람 문
+// 검증(user-input.ts)과 앞으로 올 에이전트 문 검증(Task 6)이 같은 닫힌 집합을
+// 봐야 하므로 여기 한 곳에 둔다 — lib은 app을 import할 수 없어(R1) validate-entry.ts가
+// 아니라 이 파일이 그 공유 지점이다.
+import type { ReasonTag } from "../types";
+export const REASON_TAGS: readonly ReasonTag[] = [
+  "수급", "지표", "섹터강세", "미국장", "뉴스", "밸류체인", "직관", "에이전트",
+];
+
+/** 사람 문·에이전트 문 검증 함수가 공유하는 판정 결과 모양. */
+export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string; field: string };
+
 /**
  * 이 티커를 파일 경로에 넣어도 되는가. 경로 구분자·상위 디렉터리(..)는 물론
  * 형식에서 벗어난 값 전부를 막는다 — 화이트리스트라 새로운 우회를 걱정할 필요가

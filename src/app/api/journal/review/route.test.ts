@@ -29,6 +29,10 @@ vi.mock("node:fs", () => ({
 
 import { POST } from "./route";
 
+// KOSPI(0001) 조회는 사용자 입력이 아니라 라우트가 스스로 참조하는 고정
+// 상수라 매 요청마다 항상 일어난다 — C-1 단언에서 유일하게 봐줄 fs 접근이다.
+const KOSPI_PATH = "data/candles/KR-0001-D.json";
+
 function entry(partial: Partial<JournalEntry>): JournalEntry {
   return {
     id: Math.random().toString(36),
@@ -118,14 +122,9 @@ describe("POST /api/journal/review", () => {
     expect(body.closedCount).toBe(1); // 일지 자체 값(실제 수익)은 그대로 집계된다
     expect(body.missingPrices).toContain(evil);
 
-    // 파일 존재 확인조차 하지 않았어야 한다 — 경로가 안전한지가 아니라
-    // "아예 안 갔다"를 단언한다(빈 배열이면 아래 루프가 통째로 건너뛰므로
-    // 루프만으로는 검증이 공허해진다).
-    expect(fsState.existsCalls).toEqual([]);
-    for (const p of fsState.existsCalls) {
-      expect(p.startsWith("data/")).toBe(true);
-      expect(p).not.toContain("..");
-    }
+    // 이 evil 티커에 대해서는 파일 존재 확인조차 하지 않았어야 한다 — KOSPI
+    // 고정 조회 하나만 빼고 나면 그 사실이 "아예 안 갔다"로 그대로 남는다.
+    expect(fsState.existsCalls.filter((p) => p !== KOSPI_PATH)).toEqual([]);
   });
 
   it("skip 액션의 ticker도 같은 검증을 거친다", async () => {
@@ -134,6 +133,56 @@ describe("POST /api/journal/review", () => {
       settings: { sealDays: 180 },
     });
     expect(res.status).toBe(200);
-    expect(fsState.existsCalls).toEqual([]);
+    // KOSPI 고정 조회 하나만 빼면, 사용자가 준 evil 티커("..")에 대해서는
+    // 아무 fs 접근도 없어야 한다.
+    expect(fsState.existsCalls.filter((p) => p !== KOSPI_PATH)).toEqual([]);
+  });
+
+  // ── KOSPI 대조(관망 반사실 vs 시장) ──────────────────────────────────────
+  it("KOSPI 종가 파일(KR-0001-D.json)이 있으면 skip.user.kospiMean20이 숫자로 붙는다", async () => {
+    fsState.files.set(
+      "data/candles/KR-X-D.json",
+      JSON.stringify({
+        candles: Array.from({ length: 30 }, (_, i) => ({
+          date: `2025-01-${String(i + 1).padStart(2, "0")}`,
+          close: 100 + i,
+        })),
+      })
+    );
+    fsState.files.set(
+      KOSPI_PATH,
+      JSON.stringify({
+        candles: Array.from({ length: 30 }, (_, i) => ({
+          date: `2025-01-${String(i + 1).padStart(2, "0")}`,
+          close: 1000 + i * 5,
+        })),
+      })
+    );
+    const res = await post({
+      entries: [entry({ ticker: "X", action: "skip", date: "2025-01-01" })],
+      settings: { sealDays: 180 },
+    });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(typeof body.skip.user.kospiMean20).toBe("number");
+  });
+
+  it("KOSPI 종가 파일이 없으면 skip.user.kospiMean20은 undefined", async () => {
+    fsState.files.set(
+      "data/candles/KR-X-D.json",
+      JSON.stringify({
+        candles: Array.from({ length: 30 }, (_, i) => ({
+          date: `2025-01-${String(i + 1).padStart(2, "0")}`,
+          close: 100 + i,
+        })),
+      })
+    );
+    const res = await post({
+      entries: [entry({ ticker: "X", action: "skip", date: "2025-01-01" })],
+      settings: { sealDays: 180 },
+    });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.skip.user.kospiMean20).toBeUndefined();
   });
 });

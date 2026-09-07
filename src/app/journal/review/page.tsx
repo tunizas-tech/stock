@@ -12,7 +12,8 @@ import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { db } from "@/lib/data";
-import { fmtDate, fmtPct, pnlClass, todayISO } from "@/lib/format";
+import { fmtDate, fmtPct, pnlClass } from "@/lib/format";
+import { todayKst } from "@/lib/kst";
 import {
   DEFAULT_SETTINGS,
   isSealed,
@@ -23,14 +24,8 @@ import {
   type JournalSettings,
 } from "@/lib/journal/settings";
 import { MIN_SAMPLE } from "@/lib/journal/review";
-import type { EmotionGroupStat, GroupStat } from "@/lib/journal/review";
+import type { EmotionGroupStat, GroupStat, SkipStat } from "@/lib/journal/review";
 import type { JournalEntry } from "@/lib/types";
-
-interface SkipStatShape {
-  n: number;
-  cfMean20?: number;
-  insufficient: boolean;
-}
 
 interface DisciplineShape {
   checked: number;
@@ -38,13 +33,16 @@ interface DisciplineShape {
   excessLoss: number;
 }
 
+// SkipStat은 review.ts(route가 실제로 계산하는 곳)에서 그대로 가져온다 — 여기서
+// 다시 손으로 선언하면 route가 필드를 바꿔도 컴파일이 통과해 런타임에만 깨진다
+// (Task 7 리뷰에서 실제로 그렇게 드러났다).
 interface ReviewResponse {
   closedCount: number;
   openCount: number;
   byEmotion: EmotionGroupStat[];
   byTag: GroupStat[];
   byHold: GroupStat[];
-  skip: SkipStatShape;
+  skip: { user: SkipStat; agent: SkipStat };
   discipline?: DisciplineShape;
   missingPrices: string[];
 }
@@ -74,11 +72,19 @@ export default function JournalReviewPage() {
   const [data, setData] = useState<ReviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [reviewError, setReviewError] = useState(false);
-  const today = todayISO();
+  // 봉인 비교는 브라우저 시간대가 아니라 KST로 한다(설계 §3.3) — 해외에서 열면
+  // todayISO()는 하루 어긋나 봉인이 하루 일찍/늦게 열린다.
+  const today = todayKst();
+  // 목록 읽기 실패를 삼키면 entries가 null로 남아 "불러오는 중…"이 영원히 걸린다.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      setEntries(await db.listJournal());
+      try {
+        setEntries(await db.listJournal());
+      } catch (e) {
+        setLoadError(e instanceof Error ? e.message : "알 수 없는 오류");
+      }
       setSettings(loadSettings());
     })();
   }, []);
@@ -130,7 +136,11 @@ export default function JournalReviewPage() {
     <div>
       <PageHeader kicker="journal · review" title="자기검증" />
 
-      {entries === null ? (
+      {loadError ? (
+        <p className="text-sm text-muted">
+          서버에서 기록을 불러오지 못했습니다 — DATABASE_URL·db/journal-schema.sql을 확인하세요. ({loadError})
+        </p>
+      ) : entries === null ? (
         <p className="text-sm text-muted">불러오는 중…</p>
       ) : sealed ? (
         <SealedView
@@ -143,8 +153,6 @@ export default function JournalReviewPage() {
         <p className="text-sm text-muted">계산 중…</p>
       ) : reviewError || !data ? (
         <EmptyState title="자기검증을 불러오지 못했습니다" hint="새로고침해 다시 시도하세요." />
-      ) : data.closedCount === 0 ? (
-        <EmptyState title="아직 짝지어진 거래가 없다 — 매수와 매도를 같은 종목으로 기록하면 여기 나타난다." />
       ) : (
         <ReviewSections data={data} />
       )}
@@ -383,9 +391,56 @@ function Stat({
   );
 }
 
+/**
+ * 관망 한 줄(사람/에이전트 공용). `n`(전체 관망 수)과 `pairedN`(KOSPI까지 짝지어져
+ * kospiMean20·delta의 분모가 된 수)는 서로 다른 모집단일 수 있다 — GroupTable의
+ * "대조 N"과 같은 이유로, n 옆에 작게 pairedN을 적어 그 차이를 표 밖으로 새지
+ * 않게 한다. KOSPI·차이 두 칸은 pairedN이 MIN_SAMPLE에 못 미치면 회색으로 둔다
+ * (숫자 자체는 지우지 않는다 — GroupTable의 cellClass와 같은 원칙).
+ */
+function SkipRow({ label, s }: { label: string; s: SkipStat }) {
+  const grey = s.insufficient;
+  const benchGrey = s.pairedN < MIN_SAMPLE;
+  const cls = (v: number | undefined, g: boolean) => (g || v === undefined ? "text-muted" : pnlClass(v));
+  return (
+    <div className="flex flex-wrap items-center gap-8 rounded-xl2 border border-line bg-surface p-4">
+      <p className={`w-24 text-sm font-medium ${grey ? "text-muted" : "text-ink"}`}>{label}</p>
+      <div>
+        <p className="text-xs text-muted">n</p>
+        <p className="tabular text-base font-semibold text-ink">
+          {s.n}
+          {s.pairedN < s.n && (
+            <span className="ml-1.5 text-[10px] font-normal text-muted">짝 {s.pairedN}</span>
+          )}
+          {grey && <InsufficientChip />}
+        </p>
+      </div>
+      <Stat
+        label="반사실 20일 평균"
+        value={fmtSignedRate(s.cfMean20)}
+        valueClass={cls(s.cfMean20, grey)}
+      />
+      <Stat
+        label="같은 창 KOSPI"
+        value={fmtSignedRate(s.kospiMean20)}
+        valueClass={cls(s.kospiMean20, benchGrey)}
+      />
+      <Stat label="차이" value={fmtSignedRate(s.delta)} valueClass={cls(s.delta, benchGrey)} />
+    </div>
+  );
+}
+
 function ReviewSections({ data }: { data: ReviewResponse }) {
+  // 청산된 거래가 없어도 여기서 멈추지 않는다(I-5). 에이전트 기록은 전부 관망(skip)
+  // 이라, 청산 짝이 생길 때까지 절 전체를 가리면 7단계 채점 결과를 한 번도 못 본다 —
+  // 매수 후 1년을 들고 있는 사용자에게 그건 "영원히"와 같다. 빈 안내는 위에 두고,
+  // 관망 절과 가격 없는 종목 절은 그대로 아래에 렌더한다.
+  const noClosed = data.closedCount === 0;
   return (
     <div className="space-y-10">
+      {noClosed && (
+        <EmptyState title="아직 짝지어진 거래가 없다 — 매수와 매도를 같은 종목으로 기록하면 여기 나타난다." />
+      )}
       {/* 아직 안 판 포지션이 몇 건인지 먼저 알린다 — 아래 모든 숫자는 청산된
           거래만 센 값이라, 진행 중 포지션이 많으면 "지금까지의 성적"이 아니라
           "판 것들만의 성적"을 보고 있는 것이다(생존 편향의 사촌). */}
@@ -418,15 +473,11 @@ function ReviewSections({ data }: { data: ReviewResponse }) {
 
       <ReviewSection
         title="관망(skip)"
-        caption="검토하고 안 산 종목의 평균이다. 이것이 없으면 판단력 자체는 잴 수 없다."
+        caption="검토하고 안 산 종목의 평균이다. 같은 날짜·같은 20일 창의 KOSPI를 옆에 둔다 — 시장이 더 올랐다면 그 관망은 잘한 것이 아니다. 에이전트 줄은 내 판단력과 섞지 않는다. KOSPI·차이는 두 값이 모두 계산된 관망(짝 n)끼리만 비교한 값이다."
       >
-        <div className="flex flex-wrap items-center gap-8 rounded-xl2 border border-line bg-surface p-4">
-          <Stat label="n" value={String(data.skip.n)} insufficient={data.skip.insufficient} />
-          <Stat
-            label="반사실 20일 평균"
-            value={fmtSignedRate(data.skip.cfMean20)}
-            valueClass={data.skip.cfMean20 !== undefined ? pnlClass(data.skip.cfMean20) : "text-muted"}
-          />
+        <div className="space-y-3">
+          <SkipRow label="내 관망" s={data.skip.user} />
+          <SkipRow label="에이전트 관망" s={data.skip.agent} />
         </div>
       </ReviewSection>
 

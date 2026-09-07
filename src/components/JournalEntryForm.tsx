@@ -19,18 +19,18 @@ import type {
   Market,
   ReasonTag,
 } from "@/lib/types";
-import { todayISO } from "@/lib/format";
+// 날짜 기본값은 KST다(설계 §3.3) — 브라우저 시간대로 찍으면 해외에서 열었을 때
+// 거래일이 하루 어긋난 채 저장된다.
+import { todayKst } from "@/lib/kst";
 import { DECLARED_PROB } from "@/lib/journal/review";
+// 태그 목록은 validate.ts 한 곳에서만 관리한다 — 여기 손으로 베껴 두면 8번째
+// "에이전트"를 넣었을 때처럼 한쪽만 늘어나 선택지가 조용히 어긋난다(M-5).
+import { REASON_TAGS } from "@/lib/journal/validate";
 
 type Draft = Omit<JournalEntry, "id">;
 
 const inputClass =
   "w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-accent";
-
-// ReasonTag(7종 고정, types.ts) — review.ts는 이 목록을 내부 전용으로만 쓰고
-// export하지 않는다(주 이유별 묶음 계산에만 쓰면 되기 때문). 화면에 필요한
-// 선택지는 같은 타입에서 여기 따로 든다.
-const REASON_TAGS: ReasonTag[] = ["수급", "지표", "섹터강세", "미국장", "뉴스", "밸류체인", "직관"];
 
 export function JournalEntryForm({
   onSubmit,
@@ -39,8 +39,12 @@ export function JournalEntryForm({
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  // 저장은 서버 모드에서 네트워크 호출이다(4단계 이후). 실패를 삼키면 사용자는
+  // 저장 버튼을 누른 뒤 아무 일도 일어나지 않는 폼을 보게 된다 — 메시지를 띄우고
+  // 초안은 그대로 열어 둔다(reset하지 않는다).
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const [date, setDate] = useState(todayISO());
+  const [date, setDate] = useState(todayKst());
   const [market, setMarket] = useState<Market>("KR");
   const [ticker, setTicker] = useState("");
   const [name, setName] = useState("");
@@ -58,7 +62,7 @@ export function JournalEntryForm({
   const needsPrimaryTag = action === "buy" || action === "skip";
 
   function reset() {
-    setDate(todayISO());
+    setDate(todayKst());
     setMarket("KR");
     setTicker("");
     setName("");
@@ -120,9 +124,13 @@ export function JournalEntryForm({
     }
 
     try {
+      setSaveError(null);
       await onSubmit(draft);
       reset();
       setOpen(false);
+    } catch (e) {
+      // 초안을 그대로 둔다 — 사용자가 방금 쓴 이유를 다시 타이핑하게 만들지 않는다.
+      setSaveError(e instanceof Error ? e.message : "저장하지 못했습니다");
     } finally {
       setBusy(false);
     }
@@ -328,6 +336,12 @@ export function JournalEntryForm({
           </button>
         </div>
       </div>
+
+      {saveError && (
+        <p className="mt-3 text-right text-xs text-loss">
+          저장하지 못했습니다 — {saveError}
+        </p>
+      )}
     </form>
   );
 }

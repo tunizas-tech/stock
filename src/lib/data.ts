@@ -1,10 +1,12 @@
 // 저장소 파사드(디자인 §5.2-1). 페이지는 오직 db.* 만 호출한다.
-// 환경변수(Supabase) 유무로 Postgres ↔ localStorage 자동 분기.
-// - 설정 O: Supabase(Postgres)
+// 일지는 서버(`/api/journal`, Postgres) ↔ localStorage, 보유·관심은 Supabase ↔ localStorage(변경 없음).
+// - 설정 O: Supabase(Postgres) — 보유/관심만. 서버 감지 O — 일지는 `/api/journal`(Postgres)
 // - 설정 X: 브라우저 localStorage (+ 최초 1회 시드 주입)
 
 import { supabase } from "./supabase";
 import { todayISO } from "./format";
+import { detectStorageMode } from "./storage-mode";
+import { deleteJournalEntry, fetchJournal, patchLesson, postJournal } from "./journal-client";
 import type { Holding, JournalEntry, WatchItem } from "./types";
 
 const LS_KEYS = {
@@ -209,14 +211,7 @@ export const db = {
 
   // ---- Journal ------------------------------------------------------------
   async listJournal(): Promise<JournalEntry[]> {
-    if (supabase) {
-      const { data, error } = await supabase
-        .from("journal")
-        .select("*")
-        .order("date", { ascending: false });
-      if (error) throw error;
-      return (data as JournalEntry[]) ?? [];
-    }
+    if ((await detectStorageMode()) === "server") return fetchJournal();
     ensureSeed();
     // 최신순 정렬(디자인 §4: 기록 카드 목록 최신순)
     return lsRead<JournalEntry>(LS_KEYS.journal).sort((a, b) =>
@@ -225,15 +220,7 @@ export const db = {
   },
 
   async addJournal(input: Omit<JournalEntry, "id">): Promise<JournalEntry> {
-    if (supabase) {
-      const { data, error } = await supabase
-        .from("journal")
-        .insert(input)
-        .select()
-        .single();
-      if (error) throw error;
-      return data as JournalEntry;
-    }
+    if ((await detectStorageMode()) === "server") return postJournal(input);
     const row: JournalEntry = { ...input, id: newId() };
     const rows = lsRead<JournalEntry>(LS_KEYS.journal);
     lsWrite(LS_KEYS.journal, [row, ...rows]);
@@ -242,14 +229,7 @@ export const db = {
 
   /** 복기(lesson)만 나중에 채우는 경로. */
   async updateJournalLesson(id: string, lesson: string): Promise<void> {
-    if (supabase) {
-      const { error } = await supabase
-        .from("journal")
-        .update({ lesson })
-        .eq("id", id);
-      if (error) throw error;
-      return;
-    }
+    if ((await detectStorageMode()) === "server") return patchLesson(id, lesson);
     const rows = lsRead<JournalEntry>(LS_KEYS.journal).map((r) =>
       r.id === id ? { ...r, lesson } : r
     );
@@ -257,15 +237,33 @@ export const db = {
   },
 
   async removeJournal(id: string): Promise<void> {
-    if (supabase) {
-      const { error } = await supabase.from("journal").delete().eq("id", id);
-      if (error) throw error;
-      return;
-    }
+    if ((await detectStorageMode()) === "server") return deleteJournalEntry(id);
     const rows = lsRead<JournalEntry>(LS_KEYS.journal).filter(
       (r) => r.id !== id
     );
     lsWrite(LS_KEYS.journal, rows);
+  },
+
+  /** 이관 카드용 — 시드 2건은 사용자의 기록이 아니므로 뺀다. */
+  localJournalForImport(): JournalEntry[] {
+    return lsRead<JournalEntry>(LS_KEYS.journal).filter(
+      (r) => !SEED_JOURNAL.some((s) => s.id === r.id)
+    );
+  },
+
+  /**
+   * 이관에서 거절된 행만 남기고 나머지를 지운다. 전부 비우는 clearLocalJournal과
+   * 나눠 둔 이유: 서버가 받지 않은 행까지 지우면 그 기록은 어디에도 남지 않는다.
+   */
+  replaceLocalJournal(rows: JournalEntry[]): void {
+    if (typeof window === "undefined") return;
+    lsWrite(LS_KEYS.journal, rows);
+  },
+
+  /** 이관 완료 후 이 브라우저의 사본을 비운다(중복 이관 방지). */
+  clearLocalJournal(): void {
+    if (typeof window === "undefined") return;
+    window.localStorage.removeItem(LS_KEYS.journal);
   },
 };
 

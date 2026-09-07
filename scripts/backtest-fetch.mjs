@@ -9,6 +9,11 @@
 //                    필드명이 지수와 달라(해외는 특히 xymd/clos/tvol/tamt) 응답 매핑을 따로 둔다.
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
+// [4] 단계(일지 종목 일봉)에서만 쓰지만, ESM은 어차피 최상단으로 끌어올리므로
+// 가독성을 위해 기존 import와 함께 맨 위에 둔다(컨트롤러 R3).
+import pg from "pg";
+import { journalTickersToFetch } from "./lib/journal-tickers.mjs";
+import { todayKst } from "./lib/kst.mjs";
 
 const BASE = "https://openapi.koreainvestment.com:9443";
 const OUT_DIR = "data/candles";
@@ -132,7 +137,7 @@ function buildRequest(target, from, to) {
       `&FID_INPUT_DATE_1=${from}&FID_INPUT_DATE_2=${to}&FID_PERIOD_DIV_CODE=D`;
     return { path, trId, qs };
   }
-  // kind === "etf"
+  // kind === "etf" | "stock" — 국내는 ETF든 개별 종목이든 같은 기간별시세 엔드포인트를 쓴다.
   if (target.market === "KR") {
     // 국내주식 기간별시세. FID_ORG_ADJ_PRC=0 이 수정주가(분배락 등 반영) — kis.ts와 동일하게 맞춘다.
     const path = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice";
@@ -301,5 +306,53 @@ for (const etf of SECTOR_ETFS) await loadTarget(token, etf);
 
 console.log("\n[4] 섹터 로테이션 후보 일봉 적재 (국내 ETF 7종 + KODEX 200, 15년치)");
 for (const etf of ROTATION_ETFS) await loadTarget(token, etf);
+
+// ── [5] 일지 종목 일봉(7단계 설계 §8) — DATABASE_URL이 있을 때만 ────────────
+// 에이전트·사용자가 일지에 남긴 KR 종목의 일봉을 따라 받아야 관망 반사실이 계산된다.
+// 처음엔 최근 2년만(20거래일 반사실이면 충분), 이후 증분. 하루 새 종목은 최대 3개라 수 초.
+// (설계 문서의 브리프는 이 단계를 "[4]"로 부르지만, 위에 이미 로테이션 ETF 적재가
+//  [4]를 쓰고 있어 콘솔 출력이 겹치지 않도록 [5]로 번호를 맞춘다.)
+if (process.env.DATABASE_URL) {
+  console.log("\n[5] 일지 종목 일봉 적재");
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  try {
+    const { rows } = await pool.query(`select distinct ticker from journal where market = 'KR'`);
+    const lastDates = new Map();
+    for (const { ticker } of rows) {
+      const file = `${OUT_DIR}/KR-${ticker}-D.json`;
+      if (!/^\d{6}$/.test(ticker) || !existsSync(file)) continue;
+      try {
+        const prev = JSON.parse(await readFile(file, "utf8"));
+        lastDates.set(ticker, prev.candles.at(-1)?.date);
+      } catch {
+        /* 손상 → 처음부터 */
+      }
+    }
+    // [2]~[4]가 이미 label·kind를 갖춰 적재하는 코드는 절대 여기서 다시 받지 않는다.
+    // loadTarget은 파일 전체를 다시 쓰므로 같은 코드를 stock으로 받으면 label이
+    // "KODEX 반도체" → "091160"으로 덮이고, label로 ETF를 찾는 snapshot-data.ts가
+    // 그 순간부터 sectorRsRank를 영구히 놓친다(경고 한 줄 없이).
+    const managed = new Set([...INDICES, ...SECTOR_ETFS, ...ROTATION_ETFS].map((t) => t.code));
+    const todo = journalTickersToFetch(
+      rows.map((r) => r.ticker),
+      lastDates,
+      todayKst(),
+      managed
+    );
+    console.log(`  대상 ${todo.length}종목`);
+    for (const { ticker, from } of todo) {
+      await loadTarget(token, { market: "KR", code: ticker, kind: "stock", label: ticker, from });
+    }
+  } catch (e) {
+    // 이 단계는 선택이다(설계 §8). journal 테이블이 아직 없거나(첫 배포) DB가 잠깐
+    // 죽어도 [2]~[4]로 받은 19종은 이미 디스크에 있다 — 여기서 던지면 매일 아침
+    // 예약 작업이 빨갛게 뜨고 "완료" 줄이 안 찍힐 뿐, 잃는 것은 없다.
+    console.log(`  경고: 일지 종목 적재 건너뜀 — ${e.message}`);
+  } finally {
+    await pool.end();
+  }
+} else {
+  console.log("\n[5] 일지 종목 일봉 — DATABASE_URL 없음, 건너뜀");
+}
 
 console.log("\n완료. 다음: npm run backtest:run\n");

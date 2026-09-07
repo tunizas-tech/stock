@@ -3,7 +3,7 @@
 // APP_USER/APP_PASS 환경변수가 없으면 인증을 걸지 않는다 — 로컬 개발은 지금과 똑같이 열려 있다.
 
 /** 길이가 달라도 같은 시간이 걸리도록 비교한다. 개인용이라 과하지만 비용이 0이다. */
-function timingSafeEqual(a: string, b: string): boolean {
+export function timingSafeEqual(a: string, b: string): boolean {
   const len = Math.max(a.length, b.length);
   let diff = a.length ^ b.length;
   for (let i = 0; i < len; i++) {
