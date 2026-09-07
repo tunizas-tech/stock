@@ -259,7 +259,7 @@ function ReviewSection({
 // 한 번만 말한다. delta는 대조군이 실제로 돈 거래끼리만 비교한 값이라
 // (review.ts computeGroupStat), n과 "시세 n"이 다를 수 있다 — 표 옆의 작은
 // 글씨가 그 차이를 행마다 알리고, 이 문장이 이유를 한 번 설명한다.
-const DELTA_NOTE = "무작위 대비 차이는 시세가 있는 거래끼리만 비교한 값이다.";
+const DELTA_NOTE = "무작위 대비 차이는 무작위 대조군을 실제로 돌린 거래(대조 n)끼리만 비교한 값이다 — 시세가 없거나 당일 청산한 거래는 빠진다.";
 
 function InsufficientChip() {
   return (
@@ -334,7 +334,7 @@ function GroupTable({
                     // 그대로 둔다 — 표에서 빠지면 "무작위보다 나았다"를 전체
                     // 거래에 대한 말로 읽게 된다.
                     <span className="ml-1.5 text-[10px] font-normal text-muted">
-                      시세 {r.priceN}
+                      대조 {r.priceN}
                     </span>
                   )}
                 </td>
@@ -347,7 +347,7 @@ function GroupTable({
                 </td>
                 <td className={`tabular px-4 py-3 text-right ${cellClass(benchGrey, r.delta)}`}>
                   {fmtSignedRate(r.delta)}
-                  {r.priceN < MIN_SAMPLE && <InsufficientChip />}
+                  {!r.insufficient && r.priceN < MIN_SAMPLE && <InsufficientChip />}
                 </td>
                 <td className={`tabular px-4 py-3 text-right ${cellClass(benchGrey, r.cfMean20)}`}>
                   {fmtSignedRate(r.cfMean20)}
