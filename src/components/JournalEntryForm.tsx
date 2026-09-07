@@ -81,6 +81,9 @@ export function JournalEntryForm({
     const trimmedTicker = ticker.trim().toUpperCase();
     const draft: Draft = {
       date,
+      // 기록을 남긴 "지금" 시각. date(거래일)는 사용자가 과거로 바꿀 수 있지만
+      // 이 값은 못 바꾼다 — 자기검증 봉인이 이걸 기준으로 시작한다(설계 §4 N2).
+      createdAt: new Date().toISOString(),
       market,
       ticker: trimmedTicker,
       name: name.trim() || trimmedTicker,
@@ -102,7 +105,11 @@ export function JournalEntryForm({
     if (action === "buy" || action === "skip") {
       try {
         const res = await fetch(
-          `/api/journal/snapshot?ticker=${encodeURIComponent(trimmedTicker)}&date=${encodeURIComponent(date)}`
+          `/api/journal/snapshot?ticker=${encodeURIComponent(trimmedTicker)}&date=${encodeURIComponent(date)}`,
+          // 스냅샷은 best-effort인데 타임아웃이 없으면 서버가 응답을 안 줄 때
+          // "저장 중…" 버튼이 무한정 걸린 채로 남는다 — 사용자는 기록을 잃었다고
+          // 생각하고 창을 닫는다. 5초면 포기하고 스냅샷 없이 저장한다.
+          { signal: AbortSignal.timeout(5000) }
         );
         if (res.ok) {
           draft.snapshot = (await res.json()) as JournalSnapshot;

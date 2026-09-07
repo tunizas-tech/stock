@@ -107,6 +107,16 @@ export interface JournalEntry {
   tags?: ReasonTag[];
   /** 저장 시 서버가 붙이는 시점 스냅샷. 계산 실패해도 저널 저장은 막지 않는다. */
   snapshot?: JournalSnapshot;
+  /**
+   * 이 기록을 실제로 남긴 시각(ISO 8601). `date`(거래일)와 다르다 — 어제 산 것을
+   * 오늘 적으면 date는 어제, createdAt은 오늘이다.
+   *
+   * 자기검증 봉인(설계 §4 N2)의 기준일이 바로 이 값이다: "기록을 남긴 뒤 180일".
+   * date를 기준으로 하면 2년 전 날짜로 기록 하나만 백필해도 봉인이 즉시 열려
+   * 봉인의 목적 자체가 사라진다. 이 필드가 생기기 전의 옛 기록은 undefined로
+   * 남고, 그 경우 봉인은 "아직 시작 안 함"으로 다룬다(settings.ts sealBaseDate).
+   */
+  createdAt?: string;
 }
 
 /**

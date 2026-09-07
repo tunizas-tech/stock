@@ -18,6 +18,7 @@ import {
   isSealed,
   loadSettings,
   saveSettings,
+  sealBaseDate,
   sealOpensOn,
   type JournalSettings,
 } from "@/lib/journal/settings";
@@ -81,12 +82,11 @@ export default function JournalReviewPage() {
     })();
   }, []);
 
-  const firstEntryDate =
-    entries && entries.length > 0
-      ? entries.reduce((min, e) => (e.date < min ? e.date : min), entries[0].date)
-      : undefined;
-
-  const sealed = isSealed(firstEntryDate, settings.sealDays, today);
+  // 봉인 기준일은 거래일(date)이 아니라 기록 시점(createdAt)이다 — 계산은
+  // settings.ts에 두고(테스트 가능) 여기서는 호출만 한다. createdAt이 있는
+  // 기록이 하나도 없으면 undefined = "아직 봉인이 시작되지 않음".
+  const sealBase = sealBaseDate(entries ?? []);
+  const sealed = isSealed(sealBase, settings.sealDays, today);
 
   useEffect(() => {
     if (entries === null || sealed) {
@@ -133,7 +133,7 @@ export default function JournalReviewPage() {
         <p className="text-sm text-muted">불러오는 중…</p>
       ) : sealed ? (
         <SealedView
-          firstEntryDate={firstEntryDate as string}
+          baseDate={sealBase}
           settings={settings}
           today={today}
           onChangeSettings={updateSettings}
@@ -154,25 +154,35 @@ export default function JournalReviewPage() {
 // ── 봉인 상태(N2) ────────────────────────────────────────────────────────────
 
 function SealedView({
-  firstEntryDate,
+  baseDate,
   settings,
   today,
   onChangeSettings,
 }: {
-  firstEntryDate: string;
+  /** 봉인 기준일(첫 createdAt). undefined면 아직 봉인이 시작되지 않은 상태다. */
+  baseDate: string | undefined;
   settings: JournalSettings;
   today: string;
   onChangeSettings: (s: JournalSettings) => void;
 }) {
-  const opensOn = sealOpensOn(firstEntryDate, settings.sealDays);
+  const opensOn = sealOpensOn(baseDate, settings.sealDays);
   const daysLeft = opensOn ? Math.max(0, daysBetween(today, opensOn)) : 0;
 
   return (
     <div className="max-w-2xl space-y-6">
       <div className="rounded-xl2 border-2 border-accent bg-surface p-6">
         <p className="tabular text-sm font-medium text-ink">
-          첫 기록 {fmtDate(firstEntryDate)}
-          {opensOn && <> · {fmtDate(opensOn)}에 열립니다 · {daysLeft}일 남음</>}
+          {baseDate === undefined ? (
+            // createdAt이 있는 기록이 하나도 없다 — 이 필드가 생기기 전의 옛
+            // 기록만 있거나, 아직 아무것도 기록하지 않은 상태다. 열리는 날짜를
+            // 지어내지 않고 "아직 시작 안 함"을 그대로 말한다.
+            "첫 기록을 남기면 그날부터 봉인이 시작됩니다."
+          ) : (
+            <>
+              첫 기록 {fmtDate(baseDate)}
+              {opensOn && <> · {fmtDate(opensOn)}에 열립니다 · {daysLeft}일 남음</>}
+            </>
+          )}
         </p>
         <p className="mt-3 text-sm leading-relaxed text-muted">
           지금 보면 이후 기록이 영향을 받습니다 — 측정을 아는 순간 자기보고가 오염됩니다.
@@ -216,6 +226,9 @@ function SealedView({
         <p className="mt-3 text-xs leading-relaxed text-muted">
           지금 보면 이후 기록이 영향을 받습니다 — 측정을 아는 순간 자기보고가 오염됩니다.
         </p>
+        <p className="mt-2 text-xs leading-relaxed text-muted">
+          봉인·손절 설정은 이 브라우저에만 저장됩니다. 다른 기기에서는 다시 설정해야 합니다.
+        </p>
       </div>
     </div>
   );
@@ -226,10 +239,13 @@ function SealedView({
 function ReviewSection({
   title,
   caption,
+  note,
   children,
 }: {
   title: string;
   caption: string;
+  /** 캡션 아래 한 줄 더 — 표를 읽는 데 필요한 단서(예: 차이의 모집단). */
+  note?: string;
   children?: React.ReactNode;
 }) {
   return (
@@ -237,9 +253,15 @@ function ReviewSection({
       <h2 className="mb-3 font-serif text-lg font-semibold text-ink">{title}</h2>
       {children}
       <p className="mt-3 max-w-2xl text-xs leading-relaxed text-muted">{caption}</p>
+      {note && <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted">{note}</p>}
     </section>
   );
 }
+
+// 세 묶음 표에 공통으로 붙는 한 줄. delta는 시세를 찾은 거래끼리만 비교한
+// 값이라(review.ts computeGroupStat), n과 "시세 n"이 다를 수 있다는 사실을
+// 표 옆의 작은 글씨와 이 문장이 같이 알린다.
+const DELTA_NOTE = "무작위 대비 차이는 시세가 있는 거래끼리만 비교한 값이다.";
 
 function InsufficientChip() {
   return (
@@ -247,6 +269,16 @@ function InsufficientChip() {
       판단 보류
     </span>
   );
+}
+
+/**
+ * 수치 셀의 색. 표본이 20건 미만인 행(insufficient)은 손익 색을 주지 않고 회색
+ * 그대로 둔다 — "판단 보류"라고 적어놓고 초록/빨강으로 칠하면 그 색이 먼저
+ * 읽혀 결국 판단하게 된다.
+ */
+function cellClass(insufficient: boolean, v: number | undefined): string {
+  if (insufficient || v === undefined) return "";
+  return pnlClass(v);
 }
 
 function GroupTable({
@@ -292,22 +324,28 @@ function GroupTable({
                   {fmtRate((r as EmotionGroupStat).declaredProb)}
                 </td>
               )}
-              <td className="tabular px-4 py-3 text-right">{r.n}</td>
+              <td className="tabular px-4 py-3 text-right">
+                {r.n}
+                {r.priceN < r.n && (
+                  // 차이(delta)의 모집단이 전체 n보다 작다는 사실을 숫자 옆에
+                  // 그대로 둔다 — 표에서 빠지면 "무작위보다 나았다"를 전체
+                  // 거래에 대한 말로 읽게 된다.
+                  <span className="ml-1.5 text-[10px] font-normal text-muted">
+                    시세 {r.priceN}
+                  </span>
+                )}
+              </td>
               <td className="tabular px-4 py-3 text-right">{fmtRate(r.winRate)}</td>
-              <td className={`tabular px-4 py-3 text-right ${r.mean !== undefined ? pnlClass(r.mean) : ""}`}>
+              <td className={`tabular px-4 py-3 text-right ${cellClass(r.insufficient, r.mean)}`}>
                 {fmtSignedRate(r.mean)}
               </td>
-              <td
-                className={`tabular px-4 py-3 text-right ${r.randomMean !== undefined ? pnlClass(r.randomMean) : ""}`}
-              >
+              <td className={`tabular px-4 py-3 text-right ${cellClass(r.insufficient, r.randomMean)}`}>
                 {fmtSignedRate(r.randomMean)}
               </td>
-              <td className={`tabular px-4 py-3 text-right ${r.delta !== undefined ? pnlClass(r.delta) : ""}`}>
+              <td className={`tabular px-4 py-3 text-right ${cellClass(r.insufficient, r.delta)}`}>
                 {fmtSignedRate(r.delta)}
               </td>
-              <td
-                className={`tabular px-4 py-3 text-right ${r.cfMean20 !== undefined ? pnlClass(r.cfMean20) : ""}`}
-              >
+              <td className={`tabular px-4 py-3 text-right ${cellClass(r.insufficient, r.cfMean20)}`}>
                 {fmtSignedRate(r.cfMean20)}
               </td>
             </tr>
@@ -343,9 +381,18 @@ function Stat({
 function ReviewSections({ data }: { data: ReviewResponse }) {
   return (
     <div className="space-y-10">
+      {/* 아직 안 판 포지션이 몇 건인지 먼저 알린다 — 아래 모든 숫자는 청산된
+          거래만 센 값이라, 진행 중 포지션이 많으면 "지금까지의 성적"이 아니라
+          "판 것들만의 성적"을 보고 있는 것이다(생존 편향의 사촌). */}
+      <div className="flex flex-wrap items-center gap-8 rounded-xl2 border border-line bg-surface p-4">
+        <Stat label="청산된 거래" value={`${data.closedCount}건`} />
+        <Stat label="진행 중" value={`${data.openCount}건 — 수익에 넣지 않음`} />
+      </div>
+
       <ReviewSection
         title="확신도별"
         caption="선언 확률과 실제 승률의 차이가 보정 오차다. 대부분 과신 쪽으로 나온다."
+        note={DELTA_NOTE}
       >
         <GroupTable rows={data.byEmotion} keyLabel="확신도" showDeclaredProb />
       </ReviewSection>
@@ -353,6 +400,7 @@ function ReviewSections({ data }: { data: ReviewResponse }) {
       <ReviewSection
         title="주 이유별"
         caption="무작위 대조를 못 이기는 이유는 그 이유로 사지 않는 편이 낫다는 뜻이다."
+        note={DELTA_NOTE}
       >
         <GroupTable rows={data.byTag} keyLabel="주 이유" />
       </ReviewSection>
@@ -360,6 +408,7 @@ function ReviewSections({ data }: { data: ReviewResponse }) {
       <ReviewSection
         title="보유기간별"
         caption="반사실은 집계일 뿐이다. 개별 거래의 '팔지 않았으면'은 후회를 만들 뿐 규율을 돕지 않는다."
+        note={DELTA_NOTE}
       >
         <GroupTable rows={data.byHold} keyLabel="보유기간" />
       </ReviewSection>

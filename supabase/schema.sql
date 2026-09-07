@@ -47,6 +47,11 @@ alter table journal add column if not exists "primaryTag" text;
 alter table journal add column if not exists tags text[];
 alter table journal add column if not exists snapshot jsonb;
 
+-- 기록을 남긴 시각(§4 N2 봉인의 기준일). date(거래일)와 다르다 — 폼이 저장
+-- 순간에 찍어 넣으므로 과거로 되돌릴 수 없고, 그래서 백필로 봉인을 못 연다.
+-- 이 컬럼이 생기기 전의 행은 NULL로 남고 분석은 "봉인 시작 안 함"으로 다룬다.
+alter table journal add column if not exists "createdAt" timestamptz;
+
 -- action 체크 제약에 'skip'을 추가하는 것은 위 create table 문의 in (...) 목록을
 -- 새 배포에서만 적용한다 — 이미 테이블이 있는 배포는 create table if not exists가
 -- 아무것도 바꾸지 않으므로, 기존 제약을 지우고 'skip'을 포함해 다시 만들어야
