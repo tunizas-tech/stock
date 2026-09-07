@@ -3,10 +3,65 @@
 
 export type Market = "KR" | "US";
 
-export type JournalAction = "buy" | "sell" | "note";
+// "skip"(검토는 했지만 사지 않음) — 6단계 자기검증 설계 N3: 안 산 거래가
+// 없으면 "이 사람의 판단력 자체"를 잴 표본이 없다. skip에도 스냅샷을 붙여
+// "봤는데 안 산 것"과 "산 것"을 같은 기준으로 비교한다.
+export type JournalAction = "buy" | "sell" | "note" | "skip";
 
-/** 당시 확신도 1(낮음) ~ 5(높음) */
+/**
+ * 당시 확신도 1(낮음) ~ 5(높음). 필드명은 기존 데이터·Supabase 스키마 호환을
+ * 위해 그대로 두지만(6단계 설계 §1), UI는 이제 이 값을 "이 거래가 수익으로
+ * 끝날 확률"로 정의한다(설계 문서 I1 — 정의 없는 확신도는 보정 곡선을 못 그린다):
+ * 1=50% · 2=60% · 3=70% · 4=80% · 5=90%. 선언한 확률과 실제 승률의 차이가
+ * 자기검증 리뷰(§4)의 "보정 오차"다.
+ */
 export type Emotion = 1 | 2 | 3 | 4 | 5;
+
+/**
+ * 매매 이유 태그(6단계 설계 §1, 7종 고정). 국문 그대로 저장·표시한다 —
+ * 자유 텍스트가 아니라 닫힌 집합이어야 묶음별 집계(주 이유별)가 가능하다.
+ */
+export type ReasonTag = "수급" | "지표" | "섹터강세" | "미국장" | "뉴스" | "밸류체인" | "직관";
+
+/**
+ * 매매 순간의 관측소 상태를 서버가 계산해 붙이는 스냅샷(6단계 설계 §1·§2).
+ * best-effort다 — 계산에 실패해도 저널 저장 자체는 막지 않는다(`coverage`로
+ * 실패 정도만 남긴다).
+ */
+export interface JournalSnapshot {
+  /**
+   * 기준 거래일 — 매매일 "이전"의 마지막 거래일. **절대 매매일 당일이 아니다.**
+   * 적대적 리뷰 C1: 그날 마감 수급·시세가 스냅샷에 섞이면 아직 일어나지 않은
+   * 결과를 이미 알고 "그래서 샀다"는 서사를 만들 수 있다(look-ahead) —
+   * 1~5단계에서 하루 종일 막았던 바로 그 함정이라 이름을 따로 붙여 지킨다.
+   */
+  asOf: string;
+  /**
+   * 스냅샷이 얼마나 채워졌는지. "full"/"partial"/"none"을 구분하지 못하면
+   * "수급 0"(정말 수급이 없었다)과 "수급 데이터 없음"(계산 실패·유니버스 밖)이
+   * 섞여 분석이 오염된다 — 5단계 개인 열에서 이미 겪은 문제(설계 §1 "스냅샷은
+   * best-effort" 절 참고).
+   */
+  coverage: "full" | "partial" | "none";
+  /** FLOW_UNIVERSE 매핑으로 찾은 섹터. 매핑이 없으면 생략(coverage: "none"). */
+  sector?: string;
+  /**
+   * 섹터 20거래일 수급 합계 — 반드시 `asOf`까지의 데이터로만 계산한다
+   * (aggregate.ts의 `until` 인자로 강제). unreliable/tradingDays를 그대로
+   * 실어 "3주체만으로 믿어도 되는 수치인가"를 스냅샷에도 남긴다.
+   */
+  sectorFlow20?: { foreign: number; institution: number; other: number; unreliable: boolean; tradingDays: number };
+  /** 섹터→로테이션 ETF 매핑이 있을 때만 계산되는 `asOf` 기준 250일 상대강도 순위. */
+  sectorRsRank?: { rank: number; of: number };
+  /** 종목 RSI(14). 가격 데이터(30종목 flow 또는 candles)가 있을 때만. */
+  rsi14?: number;
+  /** `asOf` 일의 코스피 갭. */
+  kospiGap?: number;
+  /** `asOf` 일의 코스피 장중 등락. */
+  kospiIntraday?: number;
+  /** `asOf` 전 거래일의 나스닥 등락. */
+  nasdaqPrevChange?: number;
+}
 
 export interface Holding {
   id: string;
@@ -39,6 +94,19 @@ export interface JournalEntry {
   reason: string;
   emotion: Emotion;
   lesson: string; // 복기 — 나중에 채움
+
+  // 아래 셋은 6단계 자기검증 설계(§1)에서 추가한 선택 필드다. 기존 기록은
+  // 전부 undefined로 남고, 분석에서는 "태그 없음"/"스냅샷 없음" 그룹으로
+  // 잡힌다 — 마이그레이션이나 기존 데이터 백필이 필요 없다.
+  /**
+   * 주 이유 하나. 매수·skip에서는 UI가 입력을 강제한다(설계 문서 I2 — 태그를
+   * 다 찍게 허용하면 "이 이유로 산 거래가 나았나"를 물을 수 없어진다).
+   */
+  primaryTag?: ReasonTag;
+  /** 보조 이유(복수 가능). 분석은 항상 `primaryTag` 기준으로 한다. */
+  tags?: ReasonTag[];
+  /** 저장 시 서버가 붙이는 시점 스냅샷. 계산 실패해도 저널 저장은 막지 않는다. */
+  snapshot?: JournalSnapshot;
 }
 
 /**

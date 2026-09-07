@@ -27,13 +27,34 @@ create table if not exists journal (
   market    text not null check (market in ('KR','US')),
   ticker    text not null,
   name      text not null,
-  action    text not null check (action in ('buy','sell','note')),
+  action    text not null check (action in ('buy','sell','note','skip')),
   price     numeric,
   qty       numeric,
   reason    text not null,
   emotion   smallint not null check (emotion between 1 and 5),
   lesson    text not null default ''
 );
+
+-- 6단계 자기검증(2026-09-07-journal-review-design.md §1) — 추가 컬럼 3개는 전부
+-- nullable이라 기존 행은 영향받지 않는다(전부 NULL로 남고 분석에서 "태그
+-- 없음"/"스냅샷 없음" 그룹이 된다). `if not exists`로 이미 컬럼이 있는 배포에도
+-- 안전하게 재실행할 수 있다.
+-- 컬럼명은 lib/data.ts의 db.addJournal이 TS 객체를 그대로 supabase.insert()에
+-- 넘기고 별도 필드 매핑을 하지 않으므로, 파일 상단 규약대로 타입 필드명과
+-- 정확히 같아야 한다(camelCase는 따옴표: "primaryTag". tags/snapshot은
+-- 원래 소문자 한 단어라 date/reason/lesson처럼 따옴표가 필요 없다).
+alter table journal add column if not exists "primaryTag" text;
+alter table journal add column if not exists tags text[];
+alter table journal add column if not exists snapshot jsonb;
+
+-- action 체크 제약에 'skip'을 추가하는 것은 위 create table 문의 in (...) 목록을
+-- 새 배포에서만 적용한다 — 이미 테이블이 있는 배포는 create table if not exists가
+-- 아무것도 바꾸지 않으므로, 기존 제약을 지우고 'skip'을 포함해 다시 만들어야
+-- 한다. 제약 이름은 Postgres가 자동 생성한 "journal_action_check"를 가정한다
+-- (이 파일로 처음 만든 테이블이면 기본값이 이 이름이다 — 수동으로 이름을 바꿨다면
+-- 그 이름으로 바꿔서 실행할 것).
+alter table journal drop constraint if exists journal_action_check;
+alter table journal add constraint journal_action_check check (action in ('buy','sell','note','skip'));
 
 -- 예정: 시세 호출 절감 + 과거 종가 기반 복기(PRD §7, §8)
 create table if not exists price_cache (
