@@ -384,6 +384,45 @@ describe("skipCounterfactual — author 분리·KOSPI 대조", () => {
   });
 });
 
+// "확신도 4~5로 낸 에이전트 후보가 1~3보다 실제로 나았나"를 답하는 표(브리프
+// 항목 1) — 사람 관망은 절대 섞이면 안 된다(그러면 "내 판단력"에 에이전트
+// 점수가 들어간다).
+describe("skipCounterfactual — 에이전트 확신도별(byEmotion)", () => {
+  const closes = Array.from({ length: 30 }, (_, i) => ({ date: `2026-01-${String(i + 1).padStart(2, "0")}`, close: 100 + i }));
+  const kospi = Array.from({ length: 30 }, (_, i) => ({ date: `2026-01-${String(i + 1).padStart(2, "0")}`, close: 1000 + i * 5 }));
+  const skip = (p: Partial<JournalEntry>): JournalEntry => ({ id: Math.random().toString(36), date: "2026-01-02", market: "KR", ticker: "X", name: "x", action: "skip", reason: "", emotion: 3, lesson: "", ...p });
+
+  it("에이전트 관망 3건(4,4,2)을 확신도별로 나눠 세고, 없는 등급은 n:0 그대로 낸다", () => {
+    const entries: JournalEntry[] = [
+      skip({ author: "agent", emotion: 4, date: "2026-01-02" }),
+      skip({ author: "agent", emotion: 4, date: "2026-01-03" }),
+      skip({ author: "agent", emotion: 2, date: "2026-01-04" }),
+    ];
+    const r = skipCounterfactual(entries, () => closes, 0, kospi);
+    expect(r.agent.n).toBe(3);
+    expect(r.agent.byEmotion["4"].n).toBe(2);
+    expect(r.agent.byEmotion["2"].n).toBe(1);
+    expect(r.agent.byEmotion["5"]).toEqual({ n: 0, pairedN: 0, insufficient: true });
+    const cf1 = forwardReturn(closes, "2026-01-02", 20, 0, entersSameDay({ date: "2026-01-02" }))!;
+    const cf2 = forwardReturn(closes, "2026-01-03", 20, 0, entersSameDay({ date: "2026-01-03" }))!;
+    expect(r.agent.byEmotion["4"].cfMean20).toBeCloseTo((cf1 + cf2) / 2, 10);
+  });
+
+  it("사람 관망은 byEmotion에 영향 없음 — user에는 byEmotion 키가 없고 agent 버킷은 그대로 n:0", () => {
+    const entries: JournalEntry[] = [
+      skip({ author: "user", emotion: 4, date: "2026-01-02" }),
+      skip({ emotion: 4, date: "2026-01-03" }), // author 미지정도 review.ts 규칙상 user 취급
+    ];
+    const r = skipCounterfactual(entries, () => closes, 0, kospi);
+    expect(r.user.n).toBe(2);
+    expect(r.agent.n).toBe(0);
+    (["1", "2", "3", "4", "5"] as const).forEach((k) => {
+      expect(r.agent.byEmotion[k]).toEqual({ n: 0, pairedN: 0, insufficient: true });
+    });
+    expect((r.user as unknown as { byEmotion?: unknown }).byEmotion).toBeUndefined();
+  });
+});
+
 describe("computeGroupStat cfMean20도 createdAt 규칙을 따른다", () => {
   it("07:30에 쓴 매수는 반사실이 그날 종가부터", () => {
     // 30일 closes, 매수 01-02 07:30 KST createdAt, 매도 01-10. cfMean20 = closes[1]→closes[21]

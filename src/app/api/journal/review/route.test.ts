@@ -78,6 +78,9 @@ describe("POST /api/journal/review", () => {
     expect(body.closedCount).toBe(0);
     expect(body.openCount).toBe(0);
     expect(body.missingPrices).toEqual([]);
+    // review.ts의 skipCounterfactual이 그대로 통과시킨 확신도별(byEmotion) 5개
+    // 키 중 하나 — entries가 없어도 n:0으로 항상 실린다는 배선만 확인한다.
+    expect(body.skip.agent.byEmotion["3"]).toBeDefined();
   });
 
   it("가격 파일이 있으면 그 종가로 대조군·반사실을 계산한다", async () => {
