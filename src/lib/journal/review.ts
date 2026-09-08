@@ -481,6 +481,13 @@ export interface SkipStat {
 }
 
 /**
+ * 에이전트 관망 전체 통계에 확신도(emotion 1~5)별 소계를 붙인 모양 — 페이지가
+ * 이 타입을 그대로 import해서 쓴다(재선언하면 route가 필드를 바꿔도 컴파일이
+ * 통과해 런타임에만 깨진다, 기존 SkipStat과 같은 이유).
+ */
+export type AgentSkipStat = SkipStat & { byEmotion: Record<"1" | "2" | "3" | "4" | "5", SkipStat> };
+
+/**
  * 관망의 20거래일 반사실 — 사람/에이전트로 나눈다(섞으면 "내 판단력"에 에이전트
  * 점수가 들어간다). 같은 진입일·같은 창의 KOSPI 수익을 나란히 둔다: 뉴스로 알게
  * 된 종목은 이미 오른 종목이기 쉬워, 시장과 비교하지 않으면 "+3%"가 좋은지 나쁜지
@@ -491,10 +498,22 @@ export function skipCounterfactual(
   priceLookup: PriceLookup,
   roundTrip: number,
   kospiCloses?: { date: string; close: number }[]
-): { user: SkipStat; agent: SkipStat } {
+): { user: SkipStat; agent: AgentSkipStat } {
+  type Bucket = { cf: number[]; pairs: [number, number][] };
   const acc = {
     user: { cf: [] as number[], pairs: [] as [number, number][] },
     agent: { cf: [] as number[], pairs: [] as [number, number][] },
+  };
+  // 에이전트 관망만 확신도(emotion)별로 한 번 더 누적한다 — "확신도 4~5로 낸
+  // 에이전트 후보가 1~3보다 실제로 나았나"를 답하는 표를 만들기 위해서다.
+  // 사람 관망은 여기 섞이면 "내 판단력"에 에이전트 점수가 들어가 버리므로
+  // 절대 넣지 않는다(브리프: 사람 관망은 바꾸지 않는다).
+  const agentByEmotion: Record<1 | 2 | 3 | 4 | 5, Bucket> = {
+    1: { cf: [], pairs: [] },
+    2: { cf: [], pairs: [] },
+    3: { cf: [], pairs: [] },
+    4: { cf: [], pairs: [] },
+    5: { cf: [], pairs: [] },
   };
   for (const e of entries) {
     if (e.action !== "skip") continue;
@@ -503,14 +522,20 @@ export function skipCounterfactual(
     const sameDay = entersSameDay(e);
     const cf = forwardReturn(prices, e.date, COUNTERFACTUAL_HORIZON_DAYS, roundTrip, sameDay);
     if (cf === undefined) continue;
-    const bucket = e.author === "agent" ? acc.agent : acc.user;
+    const isAgent = e.author === "agent";
+    const bucket = isAgent ? acc.agent : acc.user;
     bucket.cf.push(cf);
     const k = kospiCloses
       ? forwardReturn(kospiCloses, e.date, COUNTERFACTUAL_HORIZON_DAYS, roundTrip, sameDay)
       : undefined;
     if (k !== undefined) bucket.pairs.push([cf, k]);
+    if (isAgent) {
+      const eb = agentByEmotion[e.emotion];
+      eb.cf.push(cf);
+      if (k !== undefined) eb.pairs.push([cf, k]);
+    }
   }
-  const stat = (b: typeof acc.user): SkipStat => {
+  const stat = (b: Bucket): SkipStat => {
     const n = b.cf.length;
     const s: SkipStat = { n, pairedN: b.pairs.length, insufficient: n < MIN_SAMPLE };
     if (n > 0) s.cfMean20 = avg(b.cf);
@@ -520,7 +545,14 @@ export function skipCounterfactual(
     }
     return s;
   };
-  return { user: stat(acc.user), agent: stat(acc.agent) };
+  const byEmotion: Record<"1" | "2" | "3" | "4" | "5", SkipStat> = {
+    "1": stat(agentByEmotion[1]),
+    "2": stat(agentByEmotion[2]),
+    "3": stat(agentByEmotion[3]),
+    "4": stat(agentByEmotion[4]),
+    "5": stat(agentByEmotion[5]),
+  };
+  return { user: stat(acc.user), agent: { ...stat(acc.agent), byEmotion } };
 }
 
 // ---------------------------------------------------------------------------

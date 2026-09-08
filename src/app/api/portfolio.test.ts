@@ -8,7 +8,6 @@ import { POST as HIMPORT } from "./holdings/import/route";
 import { GET as WGET, POST as WPOST } from "./watchlist/route";
 import { POST as WIMPORT } from "./watchlist/import/route";
 import { GET as MODE } from "./storage/mode/route";
-import { GET as OLDMODE } from "./journal/mode/route";
 
 const HROW = { id: "h1", market: "KR", ticker: "005930", name: "삼성전자", shares: 30, avgPrice: 71200, openedAt: "2025-11-04" };
 const WROW = { id: "w1", market: "US", ticker: "NVDA", name: "엔비디아", memo: "", addedAt: "2026-01-02" };
@@ -25,11 +24,6 @@ describe("storage/mode", () => {
     const res = await MODE();
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ mode: "local" });
-  });
-  it("옛 /api/journal/mode는 307로 새 경로를 가리킨다", async () => {
-    const res = await OLDMODE(req("GET", "/api/journal/mode"));
-    expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toMatch(/\/api\/storage\/mode$/);
   });
 });
 

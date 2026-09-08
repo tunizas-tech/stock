@@ -13,6 +13,13 @@ const fsState = {
   files: new Map<string, string>(),
   /** existsSync가 어떤 경로로 불렸는지 전부 기록한다(경로 탈출 단언용). */
   existsCalls: [] as string[],
+  /**
+   * statSync가 어떤 경로로 불렸는지 전부 기록한다 — KOSPI 읽기가
+   * readJsonCached(statSync 기반)로 바뀐 뒤로는 evil 티커가 existsSync를
+   * 우회해 여기로 새어 들어올 수 있다는 걸 잡기 위한 별도 채널이다
+   * (existsCalls만 보면 이 경로는 항상 비어 있어 단언이 무의미해진다).
+   */
+  statCalls: [] as string[],
 };
 
 vi.mock("node:fs", () => ({
@@ -25,9 +32,19 @@ vi.mock("node:fs", () => ({
     if (v === undefined) throw new Error(`ENOENT: ${p}`);
     return v;
   },
+  // KOSPI 종가는 라우트가 file-cache.ts(readJsonCached)를 거쳐 읽는다 — mtime을
+  // 실제로 흉내 낼 필요는 없고(파일 내용은 fsState.files가 진실), "있으면 항상
+  // 같은 값(1)"이면 file-cache.test.ts가 이미 검증한 캐시 로직과 맞물려 정상
+  // 동작한다. 테스트 간에는 아래 afterEach의 clearFileCache()가 캐시를 비운다.
+  statSync: (p: string) => {
+    fsState.statCalls.push(p);
+    if (fsState.files.has(p)) return { mtimeMs: 1 };
+    throw new Error(`ENOENT: ${p}`);
+  },
 }));
 
 import { POST } from "./route";
+import { clearFileCache } from "@/lib/server/file-cache";
 
 // KOSPI(0001) 조회는 사용자 입력이 아니라 라우트가 스스로 참조하는 고정
 // 상수라 매 요청마다 항상 일어난다 — C-1 단언에서 유일하게 봐줄 fs 접근이다.
@@ -61,6 +78,10 @@ function post(body: unknown): Promise<Response> {
 afterEach(() => {
   fsState.files.clear();
   fsState.existsCalls.length = 0;
+  fsState.statCalls.length = 0;
+  // statSync 목이 mtimeMs를 항상 1로 고정 반환하므로, 캐시를 비우지 않으면
+  // 다음 테스트가 다른 KOSPI 내용을 넣어도 "mtime이 같다"며 이전 값을 돌려준다.
+  clearFileCache();
 });
 
 describe("POST /api/journal/review", () => {
@@ -78,6 +99,9 @@ describe("POST /api/journal/review", () => {
     expect(body.closedCount).toBe(0);
     expect(body.openCount).toBe(0);
     expect(body.missingPrices).toEqual([]);
+    // review.ts의 skipCounterfactual이 그대로 통과시킨 확신도별(byEmotion) 5개
+    // 키 중 하나 — entries가 없어도 n:0으로 항상 실린다는 배선만 확인한다.
+    expect(body.skip.agent.byEmotion["3"]).toBeDefined();
   });
 
   it("가격 파일이 있으면 그 종가로 대조군·반사실을 계산한다", async () => {
@@ -122,9 +146,14 @@ describe("POST /api/journal/review", () => {
     expect(body.closedCount).toBe(1); // 일지 자체 값(실제 수익)은 그대로 집계된다
     expect(body.missingPrices).toContain(evil);
 
-    // 이 evil 티커에 대해서는 파일 존재 확인조차 하지 않았어야 한다 — KOSPI
-    // 고정 조회 하나만 빼고 나면 그 사실이 "아예 안 갔다"로 그대로 남는다.
-    expect(fsState.existsCalls.filter((p) => p !== KOSPI_PATH)).toEqual([]);
+    // 이 evil 티커에 대해서는 fs 진입점 두 곳(existsSync·statSync) 중 어느
+    // 쪽도 건드리지 않았어야 한다 — KOSPI는 라우트가 스스로 참조하는 고정
+    // 상수라 statSync로만 걸리고(existsSync는 안 씀), 개별 종목 조회는
+    // existsSync만 쓴다. 허용되는 건 KOSPI_PATH로의 statSync 하나뿐이라,
+    // existsCalls는 통째로 비어야 하고 statCalls는 KOSPI_PATH를 뺀 나머지가
+    // 비어야 한다 — 그래야 evil 티커가 둘 중 어느 진입점으로 새도 잡힌다.
+    expect(fsState.existsCalls).toEqual([]);
+    expect(fsState.statCalls.filter((p) => p !== KOSPI_PATH)).toEqual([]);
   });
 
   it("skip 액션의 ticker도 같은 검증을 거친다", async () => {
@@ -133,9 +162,10 @@ describe("POST /api/journal/review", () => {
       settings: { sealDays: 180 },
     });
     expect(res.status).toBe(200);
-    // KOSPI 고정 조회 하나만 빼면, 사용자가 준 evil 티커("..")에 대해서는
-    // 아무 fs 접근도 없어야 한다.
-    expect(fsState.existsCalls.filter((p) => p !== KOSPI_PATH)).toEqual([]);
+    // 허용되는 건 KOSPI_PATH로의 statSync 하나뿐 — 사용자가 준 evil 티커("..")는
+    // existsSync·statSync 어느 쪽에도 흔적을 남기면 안 된다.
+    expect(fsState.existsCalls).toEqual([]);
+    expect(fsState.statCalls.filter((p) => p !== KOSPI_PATH)).toEqual([]);
   });
 
   // ── KOSPI 대조(관망 반사실 vs 시장) ──────────────────────────────────────

@@ -27,8 +27,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-// mode 케이스는 src/app/api/portfolio.test.ts로 옮겼다 — /api/journal/mode는
-// 이제 /api/storage/mode로 가는 307 리다이렉트이고, {mode} 200을 돌려주지 않는다.
+// mode 프로브는 /api/storage/mode(portfolio.test.ts)
 
 describe("GET /api/journal", () => {
   it("entries 배열을 돌려준다", async () => {

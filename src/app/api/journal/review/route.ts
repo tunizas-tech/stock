@@ -31,6 +31,7 @@ import {
 } from "@/lib/journal/review";
 import { DEFAULT_ROUND_TRIP } from "@/lib/backtest/cost";
 import { isSafeTicker } from "@/lib/journal/validate";
+import { readJsonCached } from "@/lib/server/file-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,19 @@ function candleCloses(ticker: string): { date: string; close: number }[] | undef
   }
 }
 
+// KOSPI(0001) 파일만 mtime 캐시를 쓴다 — 매 리뷰 요청마다 같은 파일
+// (832KB, 7,400봉 규모)을 다시 파싱하는 비용이 커서다. 개별 종목 종가는
+// 요청마다 티커가 달라 캐시 적중률이 낮고, C-1(경로 탈출) 테스트가 기대하는
+// fsState 기반 existsSync 배선을 흔들지 않기 위해 그대로 둔다(브리프 지정).
+const KOSPI_PATH = `${CANDLES_DIR}/KR-0001-D.json`;
+
+/** candleCloses와 같은 파싱 규칙 — readJsonCached의 parse 인자로 쓴다. */
+function parseCandles(raw: unknown): { date: string; close: number }[] {
+  const candles = (raw as { candles?: unknown })?.candles;
+  if (!Array.isArray(candles)) throw new Error("invalid candles shape");
+  return (candles as { date: string; close: number }[]).map((c) => ({ date: c.date, close: c.close }));
+}
+
 export async function POST(req: Request): Promise<NextResponse> {
   let body: { entries?: JournalEntry[]; settings?: JournalSettings };
   try {
@@ -111,9 +125,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   const byTag = groupByPrimaryTag(closed, priceLookup, REVIEW_SEED, DEFAULT_ROUND_TRIP);
   const byHold = groupByHoldBucket(closed, priceLookup, REVIEW_SEED, DEFAULT_ROUND_TRIP);
   // 관망 반사실을 시장(KOSPI, 티커 0001)과 나란히 둔다 — priceLookup을 그대로
-  // 쓰면 안전한 티커 검증(isSafeTicker)을 또 거쳐야 하니, candleCloses를 직접
-  // 부른다("0001"은 항상 안전한 상수라 검증이 필요 없다).
-  const kospi = candleCloses("0001");
+  // 쓰면 안전한 티커 검증(isSafeTicker)을 또 거쳐야 하니, 직접 읽는다("0001"은
+  // 항상 안전한 상수라 검증이 필요 없다). readJsonCached로 감싸 매 요청마다
+  // 이 파일을 다시 파싱하지 않는다(KOSPI만 — 위 KOSPI_PATH 주석 참고).
+  const kospi = readJsonCached(KOSPI_PATH, parseCandles);
   const skip = skipCounterfactual(entries, priceLookup, DEFAULT_ROUND_TRIP, kospi);
   const discipline = disciplineReport(closed, priceLookup, settings.stopLossPct, DEFAULT_ROUND_TRIP);
 

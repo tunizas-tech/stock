@@ -23,8 +23,8 @@ import {
   sealOpensOn,
   type JournalSettings,
 } from "@/lib/journal/settings";
-import { MIN_SAMPLE } from "@/lib/journal/review";
-import type { EmotionGroupStat, GroupStat, SkipStat } from "@/lib/journal/review";
+import { DECLARED_PROB, MIN_SAMPLE } from "@/lib/journal/review";
+import type { AgentSkipStat, EmotionGroupStat, GroupStat, SkipStat } from "@/lib/journal/review";
 import type { JournalEntry } from "@/lib/types";
 
 interface DisciplineShape {
@@ -42,7 +42,7 @@ interface ReviewResponse {
   byEmotion: EmotionGroupStat[];
   byTag: GroupStat[];
   byHold: GroupStat[];
-  skip: { user: SkipStat; agent: SkipStat };
+  skip: { user: SkipStat; agent: AgentSkipStat };
   discipline?: DisciplineShape;
   missingPrices: string[];
 }
@@ -398,12 +398,18 @@ function Stat({
  * 않게 한다. KOSPI·차이 두 칸은 pairedN이 MIN_SAMPLE에 못 미치면 회색으로 둔다
  * (숫자 자체는 지우지 않는다 — GroupTable의 cellClass와 같은 원칙).
  */
-function SkipRow({ label, s }: { label: string; s: SkipStat }) {
+/**
+ * `indent`: 확신도별 소행(브리프 항목 1) 전용 — 상위 "에이전트 관망" 행 아래
+ * 들여쓰기(pl-6)와 작은 글씨로 붙여, 그 행의 소계라는 걸 시각적으로 드러낸다.
+ */
+function SkipRow({ label, s, indent }: { label: string; s: SkipStat; indent?: boolean }) {
   const grey = s.insufficient;
   const benchGrey = s.pairedN < MIN_SAMPLE;
   const cls = (v: number | undefined, g: boolean) => (g || v === undefined ? "text-muted" : pnlClass(v));
   return (
-    <div className="flex flex-wrap items-center gap-8 rounded-xl2 border border-line bg-surface p-4">
+    <div
+      className={`flex flex-wrap items-center gap-8 rounded-xl2 border border-line bg-surface p-4 ${indent ? "pl-6 text-xs" : ""}`}
+    >
       <p className={`w-24 text-sm font-medium ${grey ? "text-muted" : "text-ink"}`}>{label}</p>
       <div>
         <p className="text-xs text-muted">n</p>
@@ -473,11 +479,21 @@ function ReviewSections({ data }: { data: ReviewResponse }) {
 
       <ReviewSection
         title="관망(skip)"
-        caption="검토하고 안 산 종목의 평균이다. 같은 날짜·같은 20일 창의 KOSPI를 옆에 둔다 — 시장이 더 올랐다면 그 관망은 잘한 것이 아니다. 에이전트 줄은 내 판단력과 섞지 않는다. KOSPI·차이는 두 값이 모두 계산된 관망(짝 n)끼리만 비교한 값이다."
+        caption="검토하고 안 산 종목의 평균이다. 같은 날짜·같은 20일 창의 KOSPI를 옆에 둔다 — 시장이 더 올랐다면 그 관망은 잘한 것이 아니다. 에이전트 줄은 내 판단력과 섞지 않는다. KOSPI·차이는 두 값이 모두 계산된 관망(짝 n)끼리만 비교한 값이다. 확신도 줄은 에이전트가 선언한 승률과 실제를 견주기 위한 것이다 — 4~5가 1~3보다 낫지 않다면 그 확신도는 정보가 아니다."
       >
         <div className="space-y-3">
           <SkipRow label="내 관망" s={data.skip.user} />
           <SkipRow label="에이전트 관망" s={data.skip.agent} />
+          {/* n===0인 줄도 숨기지 않는다(6단계 규칙: 숫자는 지우지 않는다) —
+              에이전트가 아직 그 확신도로 관망한 적이 없다는 것 자체가 정보다. */}
+          {([1, 2, 3, 4, 5] as const).map((k) => (
+            <SkipRow
+              key={k}
+              indent
+              label={`확신도 ${k} · ${Math.round(DECLARED_PROB[k] * 100)}%`}
+              s={data.skip.agent.byEmotion[String(k) as "1" | "2" | "3" | "4" | "5"]}
+            />
+          ))}
         </div>
       </ReviewSection>
 
