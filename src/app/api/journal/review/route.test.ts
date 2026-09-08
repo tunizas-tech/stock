@@ -25,9 +25,18 @@ vi.mock("node:fs", () => ({
     if (v === undefined) throw new Error(`ENOENT: ${p}`);
     return v;
   },
+  // KOSPI 종가는 라우트가 file-cache.ts(readJsonCached)를 거쳐 읽는다 — mtime을
+  // 실제로 흉내 낼 필요는 없고(파일 내용은 fsState.files가 진실), "있으면 항상
+  // 같은 값(1)"이면 file-cache.test.ts가 이미 검증한 캐시 로직과 맞물려 정상
+  // 동작한다. 테스트 간에는 아래 afterEach의 clearFileCache()가 캐시를 비운다.
+  statSync: (p: string) => {
+    if (fsState.files.has(p)) return { mtimeMs: 1 };
+    throw new Error(`ENOENT: ${p}`);
+  },
 }));
 
 import { POST } from "./route";
+import { clearFileCache } from "@/lib/server/file-cache";
 
 // KOSPI(0001) 조회는 사용자 입력이 아니라 라우트가 스스로 참조하는 고정
 // 상수라 매 요청마다 항상 일어난다 — C-1 단언에서 유일하게 봐줄 fs 접근이다.
@@ -61,6 +70,9 @@ function post(body: unknown): Promise<Response> {
 afterEach(() => {
   fsState.files.clear();
   fsState.existsCalls.length = 0;
+  // statSync 목이 mtimeMs를 항상 1로 고정 반환하므로, 캐시를 비우지 않으면
+  // 다음 테스트가 다른 KOSPI 내용을 넣어도 "mtime이 같다"며 이전 값을 돌려준다.
+  clearFileCache();
 });
 
 describe("POST /api/journal/review", () => {
