@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtMarketCap, fmtRatio, fmtRelative } from "./format";
+import { fmtEok, fmtMarketCap, fmtRatio, fmtRelative } from "./format";
 
 // PER·PBR 표기: KIS는 데이터가 없을 때 0을 주므로 0과 undefined는 모두 "—".
 // 음수는 적자를 뜻하는 유의미한 값이라 그대로 보여준다.
@@ -63,5 +63,13 @@ describe("fmtRelative", () => {
   });
   it("파싱 불가면 빈 문자열", () => {
     expect(fmtRelative("nope", now)).toBe("");
+  });
+});
+
+describe("fmtEok", () => {
+  it("백만원을 억원으로, 부호를 항상 붙여 소수 1자리로", () => {
+    expect(fmtEok(124_000)).toBe("+1,240.0억");
+    expect(fmtEok(-8_050)).toBe("−80.5억");
+    expect(fmtEok(0)).toBe("0.0억");
   });
 });

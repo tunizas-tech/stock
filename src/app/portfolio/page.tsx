@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { ChartModal } from "@/components/ChartModal";
 import { ImportCard } from "@/components/ImportCard";
 import { HoldingForm } from "@/components/HoldingForm";
+import { SectorFlowCompare } from "@/components/SectorFlowCompare";
 import { SectorWeightBar } from "@/components/SectorWeightBar";
 import { SectorSelect } from "@/components/SectorSelect";
 import { db } from "@/lib/data";
@@ -254,6 +255,7 @@ function HoldingsTable({
   return (
     <>
       <SectorWeightBar groups={groups} />
+      <SectorFlowCompare groups={groups} />
       <div className="overflow-x-auto rounded-xl2 border border-line bg-surface">
         <table className="w-full whitespace-nowrap text-sm">
           <thead>

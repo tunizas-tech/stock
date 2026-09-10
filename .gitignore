@@ -9,3 +9,6 @@ next-env.d.ts
 /.superpowers
 /data
 .gstack/
+
+# 참고용으로 내려받은 외부 저장소 — 앱 코드가 아니다
+clone/

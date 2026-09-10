@@ -266,3 +266,39 @@ export function stockTotals(flows: StockFlow[], days: number, until?: string): S
     return a.ticker.localeCompare(b.ticker);
   });
 }
+
+/** `flowPersistence`가 돌려주는 "지속성" 요약. */
+export interface FlowPersistence {
+  /**
+   * 최근일부터 거꾸로 (외국인+기관) 합의 부호가 같은 날이 몇 일 이어졌는가.
+   * 순매수 연속이면 양수, 순매도 연속이면 음수. 마지막 날 합이 정확히 0이면 0.
+   */
+  streak: number;
+  /** 창 안에서 (외국인+기관) 합이 양수인 날 수. 0인 날은 세지 않는다. */
+  buyDays: number;
+  /** 창 안에서 실제로 본 날 수. `days` 요청보다 작을 수 있다 — 호출자가 함께 표시해야 한다. */
+  tradingDays: number;
+}
+
+/**
+ * 합계 한 숫자로는 "19일 조금씩 팔다 하루 크게 산 것"과 "20일 내내 산 것"을
+ * 구분할 수 없다. 이 함수는 그 구분만 맡는다 — 대금은 더하지 않고 날마다의
+ * 부호만 본다. `days`는 {@link aggregateBySector}의 출력(날짜 오름차순)이어야
+ * 하고, 최근 `window`일만 쓴다.
+ */
+export function flowPersistence(days: SectorFlowDay[], window: number): FlowPersistence {
+  const recent = days.slice(-window);
+  const signs = recent.map((d) => Math.sign(d.foreign + d.institution));
+
+  let streak = 0;
+  const last = signs[signs.length - 1] ?? 0;
+  if (last !== 0) {
+    for (let i = signs.length - 1; i >= 0 && signs[i] === last; i--) streak += last;
+  }
+
+  return {
+    streak,
+    buyDays: signs.filter((s) => s > 0).length,
+    tradingDays: recent.length,
+  };
+}

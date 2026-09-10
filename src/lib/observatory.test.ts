@@ -183,6 +183,27 @@ describe("buildFlowSection", () => {
     expect(w60.coverageBySector["반도체"].tradingDays).toBe(60);
     expect(w60.coverageBySector["반도체"].realDays).toBeLessThan(60); // 백필 구간이 섞여 있다
   });
+
+  it("창마다 섹터별 지속성(persistenceBySector)을 싣는다 — 합계와 별개로 부호가 며칠 이어졌는가", () => {
+    const stocks: StockFlow[] = [
+      {
+        ticker: "009540",
+        name: "HD한국조선해양",
+        sector: "조선",
+        // 25일: 앞 13일은 순매수, 뒤 12일은 순매도 → 20일 창에서는 순매도 12일 연속, 순매수 8/20일
+        days: Array.from({ length: 25 }, (_, i) =>
+          flowDay(seqDate("2026-08-01", i), {
+            foreign: i >= 13 ? -100 : 100,
+            institution: 0,
+            individual: i >= 13 ? 100 : -100,
+            individualQty: 1,
+          })
+        ),
+      },
+    ];
+    const w20 = buildFlowSection(stocks)!.windows.find((w) => w.days === 20)!;
+    expect(w20.persistenceBySector["조선"]).toEqual({ streak: -12, buyDays: 8, tradingDays: 20 });
+  });
 });
 
 // ── ③ 섹터 상대강도 ──────────────────────────────────────────────────────────
