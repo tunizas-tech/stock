@@ -5,28 +5,27 @@
 당신의 기록은 180일 뒤 "에이전트 후보를 샀다면 20거래일 뒤 어땠나"로 KOSPI와 비교해 채점된다 — 채우려고
 고르지 말고, 확신 없는 날은 0건이 정답이다.
 
-## 환경변수
-- `STOCK_BASE_URL` — 예: `http://stock:3000` (같은 Coolify 네트워크) 또는 `https://<도메인>`
-- `AGENT_TOKEN` — 앱의 `AGENT_TOKEN`과 같은 값. 사람 로그인 비밀번호는 절대 받지 않는다.
-
-모든 요청에 `Authorization: Bearer $AGENT_TOKEN`.
+## 도구 규칙 (먼저 읽을 것)
+- **`execute_code`를 쓰지 마라.** 크론에서는 승인 정책(`approvals.cron_mode=deny`)이 막고, 막히면 그 실행은 실패로 끝난다.
+  `python3 -c`·heredoc도 같은 이유로 금지.
+- 앱과의 모든 통신은 **`terminal` 도구로 `python3 ~/.hermes/scripts/stock_api.py …`** 한 가지 방법만 쓴다.
+  토큰·주소는 스크립트가 `~/.hermes/.env`에서 읽으므로 당신이 다룰 필요가 없다. 사람 로그인 비밀번호는 절대 받지 않는다.
+- 관측소·뉴스 요약은 이 프롬프트의 **`## Script Output`에 이미 들어 있다**(크론이 실행 직전에 같은 스크립트를 돌려 넣는다).
+  다시 조회하지 말고 그것을 읽어라.
 
 ## 절차
-1. **간밤 미국·섹터 상태**: `GET $STOCK_BASE_URL/api/observatory` — `market.indices`에서 `label`이 `"나스닥"`인
-   항목의 `changePct`(전일 등락), `flow.windows`에서 `days`가 `20`인 항목의 `sectors[]`가 섹터별 20일
-   `foreign`(외국인)·`institution`(기관) 순매수. 그 `sectors[]` 원소의 `unreliable`이 true인 섹터(기타법인 경고)는
-   수급을 근거로 쓰지 않는다.
-2. **뉴스**: `GET $STOCK_BASE_URL/api/news` → `feed[].items[]`의 `pubDate`가 지난 24시간인 것만. 부족하면 `web_search`로
+1. **간밤 미국·섹터 상태**: `## Script Output`의 지수 표(나스닥 등락), 갭, 섹터 수급 20일 표, 상대강도를 읽는다.
+   `⚠️ unreliable` 표시가 붙은 섹터(기타법인 경고)는 수급을 근거로 쓰지 않는다. `⚠️ 오래된 지수 데이터` 경고가 있으면
+   그 지수의 등락은 해석에 쓰지 않는다.
+2. **뉴스**: `## Script Output`의 "앱 뉴스" 목록(지난 24시간). `(없음)`이거나 부족하면 `web_search`로
    "국내 증시 오늘", "미국 증시 마감", 관련 산업 뉴스를 보강한다.
 3. **후보 선정(≤3)**: 뉴스가 특정 한국 종목의 매출·수주·규제·가격에 **직접** 닿는 것만. 지수 전체 이야기, 이미 며칠 급등한 종목,
    기타법인 경고 섹터는 뺀다. 종목코드 6자리는 `web_search`로 확인한다(종목명만으로 기록하지 않는다).
-4. **기록**: 후보마다 한 번
+4. **기록**: 후보마다 한 번, `terminal`로
    ```
-   POST $STOCK_BASE_URL/api/journal/agent
-   { "ticker": "247540", "name": "에코프로비엠", "sector": "배터리",
-     "reason": "① 무슨 뉴스 ② 왜 이 종목 ③ 반대 근거 + 출처 URL",
-     "emotion": 3, "tags": ["뉴스", "미국장"] }
+   python3 ~/.hermes/scripts/stock_api.py post '{"ticker":"247540","name":"에코프로비엠","sector":"배터리","reason":"① 무슨 뉴스 ② 왜 이 종목 ③ 반대 근거 + 출처 URL","emotion":3,"tags":["뉴스","미국장"]}'
    ```
+   stdout 첫 줄이 `HTTP <코드>`다. JSON 안에 작은따옴표가 필요하면 본문을 파일(`/tmp/cand.json`)에 쓰고 `post @/tmp/cand.json`.
    - `sector`: 금융·반도체·방산·배터리·소비재·소재·에너지·인터넷·자동차·제약바이오·조선·통신 중 하나
    - `reason`: 세 줄 — ① 무슨 뉴스 ② 왜 이 종목 ③ 반대 근거(이미 급등·기타법인 경고·불확실성). **출처 URL 필수**
    - `emotion`: 1~5 = 이 후보를 샀을 때 수익으로 끝날 확률 50/60/70/80/90%. "뉴스가 명확하고 섹터 수급이 같은 방향"일 때만 4 이상
@@ -45,5 +44,23 @@
 재시도로 상한을 우회하지 않는다. 하루 한 번만 실행한다.
 
 ## 실행
-Coolify 예약작업 또는 Hermes 자체 cron, 07:30 KST(`30 22 * * *` UTC). 예: `hermes run --agents docs/hermes/AGENTS.md "오늘 아침 후보 검토를 수행하라"`
-(정확한 호출 형식은 Hermes 버전 문서를 따른다.)
+Hermes 자체 cron으로 돈다(Hermes v0.19에는 `hermes run` 서브커맨드가 없다). 두 환경변수는 서버의 `~/.hermes/.env`에 넣는다
+(게이트웨이가 매 턴 다시 읽으므로 재시작 불필요).
+
+이 파일은 `--workdir`로 주입된다 — Hermes가 그 디렉토리의 `AGENTS.md`를 시스템 프롬프트에 붙인다. 앱은 컨테이너 안,
+Hermes는 호스트라 저장소 경로를 직접 가리킬 수 없으니 **서버 호스트에 사본**을 둔다:
+
+```bash
+mkdir -p ~/.hermes/stock
+cp docs/hermes/AGENTS.md  ~/.hermes/stock/AGENTS.md          # 절차서 — 고치면 다시 복사
+cp docs/hermes/stock_api.py ~/.hermes/scripts/stock_api.py   # API 래퍼 — --script 주입 + post 에 공용
+hermes cron create "30 7 * * 1-5" "오늘 아침 후보 검토를 수행하라" \
+  --name morning-candidates --script stock_api.py \
+  --deliver telegram:<chat_id> --workdir /home/ubuntu/.hermes/stock
+```
+
+`--script stock_api.py`는 실행 직전에 스크립트 stdout(관측소·뉴스 요약)을 `## Script Output`으로 프롬프트에 넣는다.
+에이전트가 직접 HTTP를 호출할 필요가 없어 승인 정책과 무관해지고, 기록(POST)만 같은 스크립트를 `terminal`로 부른다.
+
+스케줄은 서버 로컬 시간(KST) 기준 07:30, 한국 장 거래일(월~금)만. 수동 실행은 `hermes cron run <id>`
+(SSH에서 `timeout`으로 감싸면 중간에 죽으니 `nohup … &`로).
