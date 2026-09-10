@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/PageHeader";
 import { CandlePanel } from "@/components/CandlePanel";
 import { db } from "@/lib/data";
 import { INDICES } from "@/lib/indices";
+import { loadSectorGroups } from "@/lib/portfolio/sector-summary";
+import { sectorColor, type SectorGroup } from "@/lib/portfolio/sector";
 
 type Counts = { holdings: number; watch: number; journal: number };
 
@@ -50,6 +52,13 @@ export default function DashboardPage() {
     journal: 0,
   });
   const [error, setError] = useState<string | null>(null);
+  // 포트폴리오 카드 밑에 붙는 "어느 산업에 얼마나" 한 줄(9단계). 시세가 필요해 카운트와
+  // 따로 받는다 — 시세가 늦어도 카운트는 먼저 뜬다.
+  const [sectors, setSectors] = useState<SectorGroup[]>([]);
+
+  useEffect(() => {
+    loadSectorGroups().then(setSectors).catch(() => setSectors([]));
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -106,6 +115,7 @@ export default function DashboardPage() {
                 <span className="text-muted">{m.unit}</span>
               )}
             </p>
+            {m.countKey === "holdings" && <TopSectors groups={sectors} />}
           </Link>
         ))}
       </div>
@@ -121,6 +131,22 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** 보유 비중 상위 3개 산업. KR 비중이 없으면(전부 해외 등) 아무것도 안 보인다. */
+function TopSectors({ groups }: { groups: SectorGroup[] }) {
+  const top = groups.filter((g) => g.weightPct !== null && g.weightPct > 0).slice(0, 3);
+  if (top.length === 0) return null;
+  return (
+    <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+      {top.map((g) => (
+        <span key={g.sector} className="flex items-center gap-1">
+          <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: sectorColor(g.sector) }} />
+          {g.sector} <span className="tabular">{g.weightPct!.toFixed(0)}%</span>
+        </span>
+      ))}
+    </p>
   );
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Holding } from "@/lib/types";
-import { groupBySector, OTHER_SECTOR, resolveSector, SECTOR_OPTIONS } from "./sector";
+import { groupBySector, OTHER_SECTOR, priceFromQuotes, resolveSector, SECTOR_OPTIONS, sectorColor } from "./sector";
 
 function h(p: Partial<Holding> & { ticker: string }): Holding {
   return { id: p.ticker, market: "KR", name: p.ticker, shares: 1, avgPrice: 0, openedAt: "2026-01-01", ...p };
@@ -55,5 +55,22 @@ describe("groupBySector", () => {
   });
   it("보유가 없으면 빈 배열", () => {
     expect(groupBySector([], price)).toEqual([]);
+  });
+});
+
+describe("sectorColor", () => {
+  it("섹터마다 고정 색, 13개가 서로 다르고 모르는 섹터도 색이 있다", () => {
+    const colors = SECTOR_OPTIONS.map(sectorColor);
+    expect(new Set(colors).size).toBe(13);
+    expect(sectorColor("반도체")).toBe(sectorColor("반도체"));
+    expect(sectorColor("듣보")).toMatch(/^hsl\(/);
+  });
+});
+
+describe("priceFromQuotes", () => {
+  it("시세가 있으면 현재가, 없으면 평단가", () => {
+    const priceOf = priceFromQuotes({ "KR:005930": { price: 70000 } as never });
+    expect(priceOf(h({ ticker: "005930", avgPrice: 60000 }))).toBe(70000);
+    expect(priceOf(h({ ticker: "000660", avgPrice: 60000 }))).toBe(60000);
   });
 });

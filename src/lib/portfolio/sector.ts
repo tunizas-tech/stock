@@ -4,7 +4,8 @@
 // 있다. 유니버스에 없는 종목은 사용자가 직접 고르고(holding.sector), 안 고르면
 // "기타"로 묶는다. AI 추론은 하지 않는다 — 틀린 자동 분류보다 빈 칸이 낫다.
 import { FLOW_SECTORS, FLOW_UNIVERSE } from "@/lib/flow/universe";
-import type { Holding } from "@/lib/types";
+import { quoteKey } from "@/lib/quotes";
+import type { Holding, Quote } from "@/lib/types";
 
 export const OTHER_SECTOR = "기타";
 
@@ -72,4 +73,22 @@ export function groupBySector(holdings: Holding[], priceOf: (h: Holding) => numb
 
   groups.sort((a, b) => (b.weightPct ?? -1) - (a.weightPct ?? -1));
   return groups;
+}
+
+/** 시세 표에서 현재가를 꺼내는 priceOf. 시세가 없으면 평단가(포트폴리오 표와 같은 규칙). */
+export function priceFromQuotes(quotes: Record<string, Quote>): (h: Holding) => number {
+  return (h) => quotes[quoteKey(h.market, h.ticker)]?.price ?? h.avgPrice;
+}
+
+// 섹터별 고정 색 — 비중 막대·범례·관측소 표시가 같은 색을 써야 눈으로 이어진다.
+// 색상환을 13등분해 이웃끼리 멀리 떨어뜨렸다(기타는 회색).
+const SECTOR_HUES: Record<string, number> = {
+  반도체: 215, 자동차: 20, 배터리: 145, 제약바이오: 340, 인터넷: 260, 금융: 45,
+  조선: 190, 방산: 0, 소재: 95, 통신: 285, 에너지: 30, 소비재: 320,
+};
+export function sectorColor(sector: string): string {
+  if (sector === OTHER_SECTOR) return "hsl(0 0% 62%)";
+  const hue = SECTOR_HUES[sector];
+  if (hue === undefined) return "hsl(0 0% 45%)";
+  return `hsl(${hue} 55% 52%)`;
 }

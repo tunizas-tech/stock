@@ -13,6 +13,8 @@
 import { useState } from "react";
 import type { Holding, Market } from "@/lib/types";
 import { todayKst } from "@/lib/kst";
+import { universeSector } from "@/lib/portfolio/sector";
+import { SectorSelect } from "./SectorSelect";
 
 type Draft = Omit<Holding, "id">;
 
@@ -33,6 +35,10 @@ export function HoldingForm({
   const [shares, setShares] = useState("");
   const [avgPrice, setAvgPrice] = useState("");
   const [openedAt, setOpenedAt] = useState(todayKst());
+  // 산업 분류. undefined = 자동(관측소 유니버스에서 찾고, 없으면 기타). 종목코드를
+  // 치는 동안 자동 결과가 괄호에 따라 바뀌어 "이 종목은 알고 있다"는 신호를 준다.
+  const [sector, setSector] = useState<string | undefined>(undefined);
+  const autoSector = universeSector(market, ticker.trim().toUpperCase());
 
   // 클라이언트 확인은 "숫자 형태를 갖췄나"만 본다 — 진짜 검증(양수·범위 등)은
   // 서버(portfolio-repo)가 한다. 여기서 서버 규칙을 베끼면 규칙이 두 곳에서
@@ -56,6 +62,7 @@ export function HoldingForm({
     setShares("");
     setAvgPrice("");
     setOpenedAt(todayKst());
+    setSector(undefined);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -71,6 +78,7 @@ export function HoldingForm({
       shares: sharesNum,
       avgPrice: avgPriceNum,
       openedAt,
+      ...(sector ? { sector } : {}),
     };
 
     try {
@@ -155,15 +163,26 @@ export function HoldingForm({
       </div>
 
       <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
-        <label className="text-xs text-muted">
-          매수일
-          <input
-            type="date"
-            value={openedAt}
-            onChange={(e) => setOpenedAt(e.target.value)}
-            className={`tabular mt-1 ${inputClass}`}
-          />
-        </label>
+        <div className="flex flex-wrap gap-3">
+          <label className="text-xs text-muted">
+            매수일
+            <input
+              type="date"
+              value={openedAt}
+              onChange={(e) => setOpenedAt(e.target.value)}
+              className={`tabular mt-1 ${inputClass}`}
+            />
+          </label>
+          <label className="text-xs text-muted">
+            산업
+            <SectorSelect
+              value={sector}
+              autoSector={autoSector}
+              onChange={setSector}
+              className={`mt-1 ${inputClass}`}
+            />
+          </label>
+        </div>
 
         <div className="flex items-center gap-2">
           <button
