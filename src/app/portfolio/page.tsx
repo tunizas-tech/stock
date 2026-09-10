@@ -255,7 +255,7 @@ function HoldingsTable({
     <>
       <SectorWeightBar groups={groups} />
       <div className="overflow-x-auto rounded-xl2 border border-line bg-surface">
-        <table className="w-full text-sm">
+        <table className="w-full whitespace-nowrap text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs text-muted">
               <th className="px-4 py-3 font-medium">종목</th>
