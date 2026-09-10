@@ -53,3 +53,63 @@ describe("compareSectorFlow", () => {
     expect(compareSectorFlow([group("조선", 36.8)], undefined)).toEqual([]);
   });
 });
+
+import { flowStance, stanceLabel, summarizeFlowCompare, type SectorFlowCompareRow } from "./flow-compare";
+
+const row = (sector: string, weightPct: number, total: number | null, streak = 0): SectorFlowCompareRow => ({
+  sector,
+  weightPct,
+  total,
+  unreliable: false,
+  persistence: total === null ? null : { streak, buyDays: 10, tradingDays: 20 },
+});
+
+describe("flowStance", () => {
+  it("20일 합이 음수면 반대 방향, 단 3일 이상 연속 매수면 돌아서는 중", () => {
+    expect(flowStance(row("자동차", 19, -1300000, 1))).toBe("opposed");
+    expect(flowStance(row("조선", 29, -65510, 4))).toBe("turning-in");
+  });
+  it("20일 합이 양수면 같은 방향, 단 3일 이상 연속 매도면 빠져나가는 중", () => {
+    expect(flowStance(row("반도체", 16, 5000, 2))).toBe("aligned");
+    expect(flowStance(row("반도체", 16, 5000, -3))).toBe("turning-out");
+  });
+  it("수급이 없으면 관측 밖", () => {
+    expect(flowStance(row("기타", 6, null))).toBe("outside");
+  });
+});
+
+describe("stanceLabel", () => {
+  it("상태 이름 뒤에 지속성 설명을 괄호로 붙인다", () => {
+    expect(stanceLabel(row("조선", 29, -65510, 4))).toBe("돌아서는 중 (4일 연속 매수)");
+    expect(stanceLabel(row("자동차", 19, -1300000, 1))).toBe("반대 방향 (20일 중 10일 매수)");
+    expect(stanceLabel(row("제약바이오", 14, -43860, -6))).toBe("반대 방향 (6일 연속 매도)");
+    expect(stanceLabel(row("기타", 6, null))).toBe("관측 밖");
+  });
+});
+
+describe("summarizeFlowCompare", () => {
+  const rows = [
+    row("조선", 29.1, -65510, 4),
+    row("자동차", 19.1, -1300220, 1),
+    row("반도체", 16.2, 8000, 3),
+    row("제약바이오", 13.6, -43860, -6),
+    row("기타", 6, null),
+  ];
+  it("큰손이 판 산업/산 산업의 비중 합과, 돌아선 산업 목록을 낸다", () => {
+    expect(summarizeFlowCompare(rows)).toMatchObject({
+      sellingPct: 61.8,
+      buyingPct: 16.2,
+      turningIn: ["조선"],
+      turningOut: [],
+    });
+  });
+  it("결론 문장: 파는 쪽 비중이 크면 반대 방향, 사는 쪽이 크면 같은 방향", () => {
+    expect(summarizeFlowCompare(rows).headline).toBe("보유 62%가 큰손이 파는 산업에 있음 — 반대 방향");
+    expect(summarizeFlowCompare([row("반도체", 40, 8000, 3), row("조선", 10, -1, 1)]).headline).toBe(
+      "보유 40%가 큰손이 사는 산업에 있음 — 같은 방향",
+    );
+  });
+  it("전부 관측 밖이면 결론 없음", () => {
+    expect(summarizeFlowCompare([row("기타", 6, null)]).headline).toBeNull();
+  });
+});
