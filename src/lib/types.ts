@@ -74,6 +74,8 @@ export interface Holding {
   shares: number;
   avgPrice: number;
   openedAt: string; // YYYY-MM-DD
+  /** 사용자가 고른 산업(관측소 12섹터 또는 "기타"). 비우면 유니버스에서 자동 판정. */
+  sector?: string;
 }
 
 export interface WatchItem {

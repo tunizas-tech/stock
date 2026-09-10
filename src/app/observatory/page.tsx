@@ -12,6 +12,8 @@ import type {
   FlowWindowDays,
   ObservatoryResponse,
 } from "@/lib/observatory";
+import { loadSectorGroups } from "@/lib/portfolio/sector-summary";
+import { sectorColor, type SectorGroup } from "@/lib/portfolio/sector";
 
 const FETCH_HINT = "data/ 아래 원본이 없습니다. npm run flow:fetch, npm run backtest:fetch 를 실행한 뒤 새로고침하세요.";
 
@@ -160,6 +162,15 @@ function MarketTodaySection({ data }: { data: ObservatoryResponse }) {
 function FlowSection({ data }: { data: ObservatoryResponse }) {
   const [days, setDays] = useState<FlowWindowDays>(20);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // 9단계: 내 보유가 어느 섹터에 얼마나 있는지를 같은 표에 표시한다 — 포트폴리오와 같은
+  // 분류(FLOW_SECTORS)라 섹터 이름으로 바로 이어진다. 실패해도 표는 그대로 나온다.
+  const [held, setHeld] = useState<Record<string, SectorGroup>>({});
+  useEffect(() => {
+    loadSectorGroups()
+      .then((groups) => setHeld(Object.fromEntries(groups.map((g) => [g.sector, g]))))
+      .catch(() => setHeld({}));
+  }, []);
+  const heldTickers = new Set(Object.values(held).flatMap((g) => g.holdings.map((h) => h.ticker)));
 
   return (
     <Section
@@ -223,7 +234,7 @@ function FlowSection({ data }: { data: ObservatoryResponse }) {
                       <th className="px-4 py-3 text-right font-medium">기타법인(추정)</th>
                       <th className="px-4 py-3 text-right font-medium">합계(외국인+기관)</th>
                       <th className="px-4 py-3 text-right font-medium">거래일</th>
-                      <th className="px-4 py-3" />
+                      <th className="px-4 py-3 font-medium">내 보유</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -270,7 +281,18 @@ function FlowSection({ data }: { data: ObservatoryResponse }) {
                                 <span className="text-loss"> (실측 {cov.realDays}일)</span>
                               )}
                             </td>
-                            <td className="px-4 py-3" />
+                            <td className="px-4 py-3">
+                              {held[s.sector] && (
+                                <span
+                                  className="tabular inline-flex items-center gap-1.5 whitespace-nowrap rounded border border-line px-1.5 py-0.5 text-[11px] text-ink"
+                                  title="포트폴리오에서 이 산업으로 분류된 보유 종목"
+                                >
+                                  <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: sectorColor(s.sector) }} />
+                                  보유 {held[s.sector].holdings.length}종목
+                                  {held[s.sector].weightPct !== null && ` · ${held[s.sector].weightPct!.toFixed(1)}%`}
+                                </span>
+                              )}
+                            </td>
                           </tr>
                           {s.unreliable && !isOpen && (
                             <tr key={`${s.sector}-note`} className="border-b border-line/60 last:border-0">
@@ -315,6 +337,11 @@ function FlowSection({ data }: { data: ObservatoryResponse }) {
                                           {fmtEok(st.other)}
                                         </td>
                                         <td className="py-1.5 text-right">
+                                          {heldTickers.has(st.ticker) && (
+                                            <span className="mr-1 rounded border border-accent px-1 py-0.5 text-[10px] font-semibold text-accent">
+                                              보유
+                                            </span>
+                                          )}
                                           {st.unreliable && (
                                             <span className="rounded border border-loss px-1 py-0.5 text-[10px] font-semibold text-loss">
                                               unreliable

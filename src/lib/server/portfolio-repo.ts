@@ -3,14 +3,17 @@
 import type { Queryable } from "./db";
 import type { Holding, WatchItem } from "../types";
 
-const H_COLS = 'id, market, ticker, name, shares, "avgPrice", "openedAt"';
+const H_COLS = 'id, market, ticker, name, shares, "avgPrice", "openedAt", sector';
 const W_COLS = 'id, market, ticker, name, memo, "addedAt"';
 
 export function holdingRow(row: Record<string, unknown>): Holding {
-  return {
+  const h: Holding = {
     id: String(row.id), market: row.market as Holding["market"], ticker: String(row.ticker), name: String(row.name),
     shares: Number(row.shares), avgPrice: Number(row.avgPrice), openedAt: String(row.openedAt),
   };
+  // sector NULL = "자동 판정"(유니버스 기준). 키 자체를 빼서 클라이언트의 `sector?:` 와 같은 모양으로 맞춘다.
+  if (row.sector !== null && row.sector !== undefined) h.sector = String(row.sector);
+  return h;
 }
 export function watchRow(row: Record<string, unknown>): WatchItem {
   return {
@@ -19,9 +22,9 @@ export function watchRow(row: Record<string, unknown>): WatchItem {
   };
 }
 
-const hParams = (h: Holding): unknown[] => [h.id, h.market, h.ticker, h.name, h.shares, h.avgPrice, h.openedAt];
+const hParams = (h: Holding): unknown[] => [h.id, h.market, h.ticker, h.name, h.shares, h.avgPrice, h.openedAt, h.sector ?? null];
 const wParams = (w: WatchItem): unknown[] => [w.id, w.market, w.ticker, w.name, w.memo ?? "", w.addedAt];
-const H_INSERT = `insert into holdings (${H_COLS}) values ($1,$2,$3,$4,$5,$6,$7)`;
+const H_INSERT = `insert into holdings (${H_COLS}) values ($1,$2,$3,$4,$5,$6,$7,$8)`;
 const W_INSERT = `insert into watchlist (${W_COLS}) values ($1,$2,$3,$4,$5,$6)`;
 
 export async function listHoldings(q: Queryable): Promise<Holding[]> {
@@ -31,6 +34,11 @@ export async function listHoldings(q: Queryable): Promise<Holding[]> {
 export async function insertHolding(q: Queryable, h: Holding): Promise<Holding> {
   const { rows } = await q.query(`${H_INSERT} returning ${H_COLS}`, hParams(h));
   return holdingRow(rows[0]);
+}
+/** 산업 분류만 바꾼다. undefined = 자동 판정으로 되돌림(NULL). 없는 id면 null. */
+export async function updateHoldingSector(q: Queryable, id: string, sector: string | undefined): Promise<Holding | null> {
+  const { rows } = await q.query(`update holdings set sector = $1 where id = $2 returning ${H_COLS}`, [sector ?? null, id]);
+  return rows[0] ? holdingRow(rows[0]) : null;
 }
 export async function deleteHolding(q: Queryable, id: string): Promise<boolean> {
   const { rowCount } = await q.query(`delete from holdings where id = $1`, [id]);

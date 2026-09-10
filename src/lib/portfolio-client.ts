@@ -24,6 +24,12 @@ export async function postHolding(draft: Omit<Holding, "id">): Promise<Holding> 
   if (!res.ok) return fail(res);
   return (await res.json()) as Holding;
 }
+/** 산업 분류만 바꾼다. undefined = 자동 판정(유니버스)으로 되돌림 → 서버엔 null로 보낸다. */
+export async function patchHoldingSector(id: string, sector: string | undefined): Promise<Holding> {
+  const res = await fetch(`/api/holdings/${encodeURIComponent(id)}`, { method: "PATCH", headers: J, body: JSON.stringify({ sector: sector ?? null }) });
+  if (!res.ok) return fail(res);
+  return (await res.json()) as Holding;
+}
 export async function deleteHoldingEntry(id: string): Promise<void> {
   const res = await fetch(`/api/holdings/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!res.ok) return fail(res);

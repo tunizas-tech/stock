@@ -7,9 +7,12 @@ create table if not exists holdings (
   name       text not null,
   shares     double precision not null check (shares > 0),
   "avgPrice" double precision not null check ("avgPrice" >= 0),
-  "openedAt" text not null                          -- YYYY-MM-DD
+  "openedAt" text not null,                         -- YYYY-MM-DD
+  sector     text                                   -- 사용자가 고른 산업(관측소 12섹터 또는 '기타'). NULL = 유니버스 자동 판정
 );
 create index if not exists holdings_opened_idx on holdings ("openedAt" desc);
+-- 9단계(섹터 분류)에서 추가. 8단계로 이미 만든 테이블에도 같은 파일을 다시 돌리면 붙는다(멱등).
+alter table holdings add column if not exists sector text;
 
 create table if not exists watchlist (
   id        text primary key,

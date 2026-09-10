@@ -13,6 +13,7 @@ import {
   deleteWatchEntry,
   fetchHoldings,
   fetchWatch,
+  patchHoldingSector,
   postHolding,
   postWatch,
 } from "./portfolio-client";
@@ -150,6 +151,20 @@ export const db = {
     const row: Holding = { ...input, id: newId() };
     const rows = lsRead<Holding>(LS_KEYS.holdings);
     lsWrite(LS_KEYS.holdings, [row, ...rows]);
+    return row;
+  },
+
+  /** 산업 분류만 바꾼다. undefined = 자동 판정(관측소 유니버스)으로 되돌림. */
+  async setHoldingSector(id: string, sector: string | undefined): Promise<Holding> {
+    if ((await detectStorageMode()) === "server") return patchHoldingSector(id, sector);
+    const rows = lsRead<Holding>(LS_KEYS.holdings);
+    const idx = rows.findIndex((r) => r.id === id);
+    if (idx < 0) throw new Error("없는 기록");
+    const { sector: _old, ...rest } = rows[idx];
+    void _old;
+    const row: Holding = sector === undefined ? rest : { ...rest, sector };
+    rows[idx] = row;
+    lsWrite(LS_KEYS.holdings, rows);
     return row;
   },
 

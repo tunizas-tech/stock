@@ -2,14 +2,23 @@
 
 // 포트폴리오(디자인 §4, PRD §6.2). 보유 종목 표(평가손익) + 관심 종목 그리드.
 // 행/카드를 클릭하면 일/주/월봉 차트 모달이 열린다.
-import { useEffect, useState } from "react";
+// 9단계: 보유 표는 산업(관측소 12섹터)별로 묶어 소계·비중을 보이고, 표 위에 비중 막대를 둔다.
+import { Fragment, useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { MarketBadge } from "@/components/MarketBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { ChartModal } from "@/components/ChartModal";
 import { ImportCard } from "@/components/ImportCard";
 import { HoldingForm } from "@/components/HoldingForm";
+import { SectorWeightBar } from "@/components/SectorWeightBar";
+import { SectorSelect } from "@/components/SectorSelect";
 import { db } from "@/lib/data";
+import {
+  groupBySector,
+  priceFromQuotes,
+  sectorColor,
+  universeSector,
+} from "@/lib/portfolio/sector";
 import { getQuotes, quoteKey } from "@/lib/quotes";
 import {
   currencyOf,
@@ -157,6 +166,15 @@ export default function PortfolioPage() {
             holdings={holdings}
             quotes={quotes}
             onOpenChart={setChart}
+            onSetSector={async (id, sector) => {
+              try {
+                const row = await db.setHoldingSector(id, sector);
+                // 시세는 그대로라 목록만 갈아끼운다 — refresh()로 시세까지 다시 받을 이유가 없다.
+                setHoldings((prev) => prev.map((h) => (h.id === id ? row : h)));
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "분류 변경 실패");
+              }
+            }}
             onRemove={async (id) => {
               try {
                 await db.removeHolding(id);
@@ -221,91 +239,147 @@ function HoldingsTable({
   holdings,
   quotes,
   onOpenChart,
+  onSetSector,
   onRemove,
 }: {
   holdings: Holding[];
   quotes: Record<string, Quote>;
   onOpenChart: (t: ChartTarget) => void;
+  onSetSector: (id: string, sector: string | undefined) => void;
   onRemove: (id: string) => void;
 }) {
+  const priceOf = priceFromQuotes(quotes);
+  const groups = groupBySector(holdings, priceOf);
+
   return (
-    <div className="overflow-x-auto rounded-xl2 border border-line bg-surface">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-line text-left text-xs text-muted">
-            <th className="px-4 py-3 font-medium">종목</th>
-            <th className="px-4 py-3 text-right font-medium">수량</th>
-            <th className="px-4 py-3 text-right font-medium">평단가</th>
-            <th className="px-4 py-3 text-right font-medium">현재가</th>
-            <th className="px-4 py-3 text-right font-medium">평가금액</th>
-            <th className="px-4 py-3 text-right font-medium">손익</th>
-            <th className="px-4 py-3 text-right font-medium">손익률</th>
-            <th className="px-4 py-3" />
-          </tr>
-        </thead>
-        <tbody>
-          {holdings.map((h) => {
-            const currency = currencyOf(h.market);
-            const q = quotes[quoteKey(h.market, h.ticker)];
-            const current = q?.price ?? h.avgPrice;
-            const marketValue = current * h.shares;
-            const cost = h.avgPrice * h.shares;
-            const pnl = marketValue - cost;
-            const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
-            return (
-              <tr
-                key={h.id}
-                onClick={() =>
-                  onOpenChart({ market: h.market, ticker: h.ticker, name: h.name })
-                }
-                title="차트 보기"
-                className="group cursor-pointer border-b border-line/60 last:border-0 hover:bg-bg/60"
-              >
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <MarketBadge market={h.market} />
-                    <span className="tabular font-medium text-ink">
-                      {h.ticker}
-                    </span>
-                    <span className="text-muted">{h.name}</span>
-                  </div>
-                </td>
-                <td className="tabular px-4 py-3 text-right">{h.shares}</td>
-                <td className="tabular px-4 py-3 text-right">
-                  {fmtMoney(h.avgPrice, currency)}
-                </td>
-                <td className="tabular px-4 py-3 text-right">
-                  {fmtMoney(current, currency)}
-                </td>
-                <td className="tabular px-4 py-3 text-right">
-                  {fmtMoney(marketValue, currency)}
-                </td>
-                <td className={`tabular px-4 py-3 text-right ${pnlClass(pnl)}`}>
-                  {fmtSignedMoney(pnl, currency)}
-                </td>
-                <td
-                  className={`tabular px-4 py-3 text-right ${pnlClass(pnlPct)}`}
-                >
-                  {fmtPct(pnlPct)}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemove(h.id);
-                    }}
-                    aria-label="보유 종목 삭제"
-                    className="text-xs text-muted opacity-0 transition-opacity hover:text-loss group-hover:opacity-100"
-                  >
-                    삭제
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <SectorWeightBar groups={groups} />
+      <div className="overflow-x-auto rounded-xl2 border border-line bg-surface">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-xs text-muted">
+              <th className="px-4 py-3 font-medium">종목</th>
+              <th className="px-4 py-3 text-right font-medium">수량</th>
+              <th className="px-4 py-3 text-right font-medium">평단가</th>
+              <th className="px-4 py-3 text-right font-medium">현재가</th>
+              <th className="px-4 py-3 text-right font-medium">평가금액</th>
+              <th className="px-4 py-3 text-right font-medium">손익</th>
+              <th className="px-4 py-3 text-right font-medium">손익률</th>
+              <th className="px-4 py-3 font-medium">산업</th>
+              <th className="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((g) => (
+              <Fragment key={g.sector}>
+                {/* 섹터 머리행: 이름·종목 수·평가금액 소계·비중·손익. US만 있는 묶음은 금액 칸이 빈다. */}
+                <tr className="border-b border-line/60 bg-bg/40">
+                  <td className="px-4 py-2" colSpan={4}>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-block h-2.5 w-2.5 rounded-sm"
+                        style={{ backgroundColor: sectorColor(g.sector) }}
+                      />
+                      <span className="font-medium text-ink">{g.sector}</span>
+                      <span className="text-xs text-muted">{g.holdings.length}종목</span>
+                      {g.weightPct !== null && (
+                        <span className="tabular rounded border border-line px-1.5 py-0.5 text-[11px] text-muted">
+                          비중 {g.weightPct.toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="tabular px-4 py-2 text-right text-xs text-muted">
+                    {g.marketValue !== null ? fmtMoney(g.marketValue, "KRW") : ""}
+                  </td>
+                  <td className={`tabular px-4 py-2 text-right text-xs ${g.pnl !== null ? pnlClass(g.pnl) : "text-muted"}`}>
+                    {g.pnl !== null ? fmtSignedMoney(g.pnl, "KRW") : ""}
+                  </td>
+                  <td className={`tabular px-4 py-2 text-right text-xs ${g.pnl !== null ? pnlClass(g.pnl) : "text-muted"}`}>
+                    {g.pnl !== null && g.marketValue !== null && g.marketValue - g.pnl > 0
+                      ? fmtPct((g.pnl / (g.marketValue - g.pnl)) * 100)
+                      : ""}
+                  </td>
+                  <td className="px-4 py-2" colSpan={2} />
+                </tr>
+                {g.holdings.map((h) => (
+                  <HoldingRow
+                    key={h.id}
+                    h={h}
+                    current={priceOf(h)}
+                    onOpenChart={onOpenChart}
+                    onSetSector={onSetSector}
+                    onRemove={onRemove}
+                  />
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function HoldingRow({
+  h,
+  current,
+  onOpenChart,
+  onSetSector,
+  onRemove,
+}: {
+  h: Holding;
+  current: number;
+  onOpenChart: (t: ChartTarget) => void;
+  onSetSector: (id: string, sector: string | undefined) => void;
+  onRemove: (id: string) => void;
+}) {
+  const currency = currencyOf(h.market);
+  const marketValue = current * h.shares;
+  const cost = h.avgPrice * h.shares;
+  const pnl = marketValue - cost;
+  const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
+  return (
+    <tr
+      onClick={() => onOpenChart({ market: h.market, ticker: h.ticker, name: h.name })}
+      title="차트 보기"
+      className="group cursor-pointer border-b border-line/60 last:border-0 hover:bg-bg/60"
+    >
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2 pl-4">
+          <MarketBadge market={h.market} />
+          <span className="tabular font-medium text-ink">{h.ticker}</span>
+          <span className="text-muted">{h.name}</span>
+        </div>
+      </td>
+      <td className="tabular px-4 py-3 text-right">{h.shares}</td>
+      <td className="tabular px-4 py-3 text-right">{fmtMoney(h.avgPrice, currency)}</td>
+      <td className="tabular px-4 py-3 text-right">{fmtMoney(current, currency)}</td>
+      <td className="tabular px-4 py-3 text-right">{fmtMoney(marketValue, currency)}</td>
+      <td className={`tabular px-4 py-3 text-right ${pnlClass(pnl)}`}>{fmtSignedMoney(pnl, currency)}</td>
+      <td className={`tabular px-4 py-3 text-right ${pnlClass(pnlPct)}`}>{fmtPct(pnlPct)}</td>
+      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+        {/* 행 클릭(차트)과 분리 — 드롭다운을 만지다 차트가 열리면 안 된다. */}
+        <SectorSelect
+          value={h.sector}
+          autoSector={universeSector(h.market, h.ticker)}
+          onChange={(sec) => onSetSector(h.id, sec)}
+          className="rounded-lg border border-line bg-bg px-2 py-1 text-xs text-ink outline-none focus:border-accent"
+        />
+      </td>
+      <td className="px-4 py-3 text-right">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(h.id);
+          }}
+          aria-label="보유 종목 삭제"
+          className="text-xs text-muted opacity-0 transition-opacity hover:text-loss group-hover:opacity-100"
+        >
+          삭제
+        </button>
+      </td>
+    </tr>
   );
 }
 
