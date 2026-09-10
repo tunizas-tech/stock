@@ -71,9 +71,10 @@ def summary():
         print(f"## 관측소 조회 실패 — HTTP {code}\n{raw[:300]}")
         return
     d = json.loads(raw)
-    today = datetime.now(KST).date()
+    now = datetime.now(KST)
+    today = now.date()
 
-    print(f"## 관측소 요약 ({today} 07:30 KST 기준)")
+    print(f"## 관측소 요약 ({now:%Y-%m-%d %H:%M} KST 기준)")
     print("### 지수 (전일 등락)")
     print("| 지수 | 시장 | 기준일 | 종가 | 등락 |")
     print("|---|---|---|---|---|")
