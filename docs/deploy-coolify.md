@@ -22,6 +22,11 @@ psql "$DATABASE_URL" -f db/portfolio-schema.sql
 
 세 파일 모두 `create table if not exists`라 재배포·재실행해도 안전하다(멱등).
 
+**컬럼이 추가된 배포에서는 `portfolio-schema.sql`을 한 번 더 돌린다.** 파일 끝의
+`alter table … add column if not exists` 줄이 기존 테이블에 새 컬럼을 붙인다(멱등).
+2026-09-10 `holdings.sector`(산업 분류, `text`, null = 유니버스에서 자동 추론)가 그렇게 들어갔다.
+이 줄 없이 새 이미지를 올리면 `/api/holdings`가 500을 내고 `/portfolio`·`/`·관측소 ②가 보유 종목을 못 보여준다.
+
 ```bash
 psql "$DATABASE_URL" -c '\d journal'   # 17개 컬럼이 보이면 성공
 ```
@@ -161,6 +166,10 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 curl -s -u "$APP_USER:$APP_PASS" https://<도메인>/api/storage/mode              # → {"mode":"server"}
 curl -s -u "$APP_USER:$APP_PASS" https://<도메인>/api/holdings                  # → {"holdings":[]}
 ```
+
+`sector` 컬럼이 빠지면 이 줄이 503이 아니라 **500**을 낸다(`column "sector" does not exist`).
+그때는 1번의 `portfolio-schema.sql`을 다시 돌린다. 산업을 손으로 고른 종목만 `"sector"` 키가
+보이고, 자동 추론(유니버스 기준)인 종목은 키가 없는 게 정상이다.
 
 `{"mode":"local"}`이면 `DATABASE_URL`이 서버에 안 들어간 것이고, `/api/holdings`가
 503이면 스키마(`db/portfolio-schema.sql`)가 아직 안 들어간 것이다.
