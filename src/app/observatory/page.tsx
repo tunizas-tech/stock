@@ -7,7 +7,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
-import { fmtPct, pnlClass } from "@/lib/format";
+import { fmtEok, fmtPct, pnlClass } from "@/lib/format";
 import type {
   FlowWindowDays,
   ObservatoryResponse,
@@ -16,16 +16,6 @@ import { loadSectorGroups } from "@/lib/portfolio/sector-summary";
 import { sectorColor, type SectorGroup } from "@/lib/portfolio/sector";
 
 const FETCH_HINT = "data/ 아래 원본이 없습니다. npm run flow:fetch, npm run backtest:fetch 를 실행한 뒤 새로고침하세요.";
-
-/** 백만원 → 억원 문자열. 부호를 항상 표시한다(디자인 §6 손익 표기 규칙과 동일). */
-function fmtEok(millionWon: number): string {
-  const eok = millionWon / 100;
-  const sign = eok > 0 ? "+" : eok < 0 ? "−" : "";
-  return `${sign}${Math.abs(eok).toLocaleString("ko-KR", {
-    maximumFractionDigits: 1,
-    minimumFractionDigits: 1,
-  })}억`;
-}
 
 function fmtIndex(value: number): string {
   return value.toLocaleString("ko-KR", { maximumFractionDigits: 2 });

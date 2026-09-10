@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateBySector,
+  flowPersistence,
   OTHER_RATIO_UNRELIABLE_THRESHOLD,
   sectorTotals,
   stockTotals,
@@ -437,5 +438,36 @@ describe("until 옵션 — 매매일 전 거래일까지만 집계(C1 가드)", 
     expect(total.foreign).toBe(10 + 100);
     expect(total.institution).toBe(10 + 100);
     expect(total.tradingDays).toBe(2);
+  });
+});
+
+describe("flowPersistence — 합계가 아니라 지속성", () => {
+  // 외국인+기관 합의 부호만 본다. 값은 일부러 작게.
+  const day = (date: string, fi: number) => ({
+    date, foreign: fi, institution: 0, individual: -fi, other: 0, stocks: 1,
+  });
+
+  it("최근일부터 거꾸로 같은 부호가 이어진 일수를 부호와 함께 돌려준다", () => {
+    const days = [day("2025-09-01", 5), day("2025-09-02", -1), day("2025-09-03", -2), day("2025-09-04", -3)];
+    expect(flowPersistence(days, 20)).toEqual({ streak: -3, buyDays: 1, tradingDays: 4 });
+  });
+
+  it("순매수 연속이면 양수 streak", () => {
+    const days = [day("2025-09-01", -5), day("2025-09-02", 1), day("2025-09-03", 2)];
+    expect(flowPersistence(days, 20).streak).toBe(2);
+  });
+
+  it("창(window) 밖의 날짜는 세지 않는다 — 최근 N일만", () => {
+    const days = [day("2025-09-01", 9), day("2025-09-02", 9), day("2025-09-03", -1), day("2025-09-04", -1)];
+    expect(flowPersistence(days, 2)).toEqual({ streak: -2, buyDays: 0, tradingDays: 2 });
+  });
+
+  it("마지막 날 합이 정확히 0이면 streak 0 (부호 없음), 0인 날은 순매수일로 세지 않는다", () => {
+    const days = [day("2025-09-01", 3), day("2025-09-02", 0)];
+    expect(flowPersistence(days, 20)).toEqual({ streak: 0, buyDays: 1, tradingDays: 2 });
+  });
+
+  it("빈 입력이면 전부 0", () => {
+    expect(flowPersistence([], 20)).toEqual({ streak: 0, buyDays: 0, tradingDays: 0 });
   });
 });

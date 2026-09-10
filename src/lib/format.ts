@@ -26,6 +26,16 @@ export function fmtPct(pct: number): string {
   return `${sign}${Math.abs(pct).toFixed(2)}%`;
 }
 
+/** 백만원 → 억원 문자열. 부호를 항상 표시한다(손익 표기 규칙과 동일). 수급 대금 표기용. */
+export function fmtEok(millionWon: number): string {
+  const eok = millionWon / 100;
+  const sign = eok > 0 ? "+" : eok < 0 ? "−" : "";
+  return `${sign}${Math.abs(eok).toLocaleString("ko-KR", {
+    maximumFractionDigits: 1,
+    minimumFractionDigits: 1,
+  })}억`;
+}
+
 /** 부호를 항상 붙인 통화. 손익 표기용. */
 export function fmtSignedMoney(amount: number, currency: Currency): string {
   const sign = amount > 0 ? "+" : amount < 0 ? "−" : "";

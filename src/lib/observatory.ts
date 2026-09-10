@@ -8,8 +8,11 @@
 
 import type { Candle } from "./types";
 import {
+  aggregateBySector,
+  flowPersistence,
   sectorTotals,
   stockTotals,
+  type FlowPersistence,
   type SectorTotal,
   type StockFlow,
   type StockTotal,
@@ -172,6 +175,11 @@ export interface FlowWindow {
   sectors: SectorTotal[];
   stocksBySector: Record<string, StockTotal[]>;
   coverageBySector: Record<string, IndividualCoverage>;
+  /**
+   * 섹터별 지속성 — 같은 창의 합계(sectors)와 나란히 읽는다. 합계 +500억이
+   * "하루 크게 산 것"인지 "20일 내내 산 것"인지는 이 값으로만 구분된다.
+   */
+  persistenceBySector: Record<string, FlowPersistence>;
 }
 
 export interface FlowSection {
@@ -189,11 +197,13 @@ export function buildFlowSection(flows: StockFlow[]): FlowSection | null {
     const stocks = stockTotals(flows, days);
     const stocksBySector: Record<string, StockTotal[]> = {};
     const coverageBySector: Record<string, IndividualCoverage> = {};
+    const persistenceBySector: Record<string, FlowPersistence> = {};
     for (const s of sectors) {
       stocksBySector[s.sector] = stocks.filter((st) => st.sector === s.sector);
       coverageBySector[s.sector] = sectorIndividualCoverage(flows, s.sector, days, realFrom);
+      persistenceBySector[s.sector] = flowPersistence(aggregateBySector(flows, s.sector), days);
     }
-    return { days, sectors, stocksBySector, coverageBySector };
+    return { days, sectors, stocksBySector, coverageBySector, persistenceBySector };
   });
 
   return { windows, individualRealFrom: realFrom };
