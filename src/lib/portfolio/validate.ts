@@ -2,6 +2,7 @@
 // 업무 규칙(중복 종목 금지 등)은 두지 않는다 — 옛 브라우저 기록 이관이 막히면 안 된다.
 import type { Holding, WatchItem } from "@/lib/types";
 import { DATE_RE, TICKER_RE, type ParseResult } from "@/lib/journal/validate";
+import { SECTOR_OPTIONS } from "./sector";
 
 const fail = (field: string, error: string): ParseResult<never> => ({ ok: false, field, error });
 const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -20,7 +21,25 @@ export function parseHolding(body: unknown): ParseResult<Omit<Holding, "id">> {
   if (!isFiniteNumber(b.shares) || b.shares <= 0) return fail("shares", "0보다 큰 숫자");
   if (!isFiniteNumber(b.avgPrice) || b.avgPrice < 0) return fail("avgPrice", "0 이상 숫자");
   if (typeof b.openedAt !== "string" || !DATE_RE.test(b.openedAt)) return fail("openedAt", "YYYY-MM-DD");
-  return { ok: true, value: { ...c.value, shares: b.shares, avgPrice: b.avgPrice, openedAt: b.openedAt } };
+  const value: Omit<Holding, "id"> = { ...c.value, shares: b.shares, avgPrice: b.avgPrice, openedAt: b.openedAt };
+  if (b.sector !== undefined) {
+    const sec = parseSectorPatch(b);
+    if (!sec.ok) return sec;
+    if (sec.value !== undefined) value.sector = sec.value;
+  }
+  return { ok: true, value };
+}
+
+/**
+ * 산업 분류 값 — 관측소 12섹터 또는 "기타"만. 빈 문자열·null은 "자동 판정으로 되돌림"(undefined).
+ * 키가 아예 없으면 실패(PATCH 본문이 비었다는 뜻).
+ */
+export function parseSectorPatch(body: unknown): ParseResult<string | undefined> {
+  const b = (body ?? {}) as Record<string, unknown>;
+  if (!("sector" in b)) return fail("sector", "sector 필요");
+  if (b.sector === null || b.sector === "") return { ok: true, value: undefined };
+  if (typeof b.sector !== "string" || !SECTOR_OPTIONS.includes(b.sector)) return fail("sector", `다음 중 하나: ${SECTOR_OPTIONS.join(", ")}`);
+  return { ok: true, value: b.sector };
 }
 
 export function parseWatch(body: unknown): ParseResult<Omit<WatchItem, "id">> {

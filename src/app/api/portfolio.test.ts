@@ -3,7 +3,7 @@ const state = { pool: null as null | { query: ReturnType<typeof vi.fn> } };
 vi.mock("@/lib/server/db", () => ({ getPool: () => state.pool }));
 
 import { GET as HGET, POST as HPOST } from "./holdings/route";
-import { DELETE as HDEL } from "./holdings/[id]/route";
+import { DELETE as HDEL, PATCH as HPATCH } from "./holdings/[id]/route";
 import { POST as HIMPORT } from "./holdings/import/route";
 import { GET as WGET, POST as WPOST } from "./watchlist/route";
 import { POST as WIMPORT } from "./watchlist/import/route";
@@ -49,9 +49,30 @@ describe("holdings", () => {
     state.pool!.query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
     expect((await HDEL(req("DELETE", "/api/holdings/zzz"), { params: { id: "zzz" } })).status).toBe(404);
   });
+  it("POST는 sector를 함께 저장한다", async () => {
+    const { id: _omit, ...draft } = HROW; void _omit;
+    await HPOST(req("POST", "/api/holdings", { ...draft, sector: "반도체" }));
+    const params = state.pool!.query.mock.calls[0][1] as unknown[];
+    expect(params[7]).toBe("반도체");
+  });
+  it("PATCH sector → 200 바뀐 행 / 모르는 섹터 400 / 없는 id 404", async () => {
+    state.pool!.query.mockResolvedValueOnce({ rows: [{ ...HROW, sector: "소재" }], rowCount: 1 });
+    const ok = await HPATCH(req("PATCH", "/api/holdings/h1", { sector: "소재" }), { params: { id: "h1" } });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).sector).toBe("소재");
+    expect(state.pool!.query.mock.calls[0][1]).toEqual(["소재", "h1"]);
+
+    const bad = await HPATCH(req("PATCH", "/api/holdings/h1", { sector: "우주" }), { params: { id: "h1" } });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).field).toBe("sector");
+
+    state.pool!.query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    expect((await HPATCH(req("PATCH", "/api/holdings/zzz", { sector: "소재" }), { params: { id: "zzz" } })).status).toBe(404);
+  });
   it("풀 없으면 503", async () => {
     state.pool = null;
     expect((await HGET()).status).toBe(503);
+    expect((await HPATCH(req("PATCH", "/api/holdings/h1", { sector: "소재" }), { params: { id: "h1" } })).status).toBe(503);
   });
   it("import는 거절 행을 index와 함께 보고하고 나머지는 넣는다", async () => {
     state.pool!.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });

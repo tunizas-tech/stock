@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseHolding, parseImportId, parseWatch } from "./validate";
+import { parseHolding, parseImportId, parseSectorPatch, parseWatch } from "./validate";
 
 const H = { market: "KR", ticker: "005930", name: "삼성전자", shares: 10, avgPrice: 70000, openedAt: "2026-09-01" };
 const W = { market: "US", ticker: "NVDA", name: "엔비디아", memo: "", addedAt: "2026-09-01" };
@@ -33,6 +33,26 @@ describe("parseHolding", () => {
   });
   it("avgPrice 0은 허용(무상 취득)", () => {
     expect(parseHolding({ ...H, avgPrice: 0 }).ok).toBe(true);
+  });
+  it("sector는 관측소 섹터·기타만 허용, 생략·빈 문자열은 키 없이", () => {
+    const ok = parseHolding({ ...H, sector: "반도체" });
+    expect(ok.ok && ok.value.sector).toBe("반도체");
+    const bad = parseHolding({ ...H, sector: "우주" });
+    expect(!bad.ok && bad.field).toBe("sector");
+    const empty = parseHolding({ ...H, sector: "" });
+    expect(empty.ok && "sector" in empty.value).toBe(false);
+  });
+});
+
+describe("parseSectorPatch", () => {
+  it("유효한 섹터는 그대로, 빈 문자열·null은 undefined(자동으로 되돌림)", () => {
+    expect(parseSectorPatch({ sector: "기타" })).toEqual({ ok: true, value: "기타" });
+    expect(parseSectorPatch({ sector: "" })).toEqual({ ok: true, value: undefined });
+    expect(parseSectorPatch({ sector: null })).toEqual({ ok: true, value: undefined });
+  });
+  it("모르는 섹터·키 없음은 실패", () => {
+    expect(parseSectorPatch({ sector: "우주" }).ok).toBe(false);
+    expect(parseSectorPatch({}).ok).toBe(false);
   });
 });
 
