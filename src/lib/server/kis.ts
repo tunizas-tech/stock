@@ -7,7 +7,8 @@
 
 import type { Candle, Fundamentals, Period, Quote } from "../types";
 
-const BASE = "https://openapi.koreainvestment.com:9443";
+// 모의투자 키는 도메인이 다르다(openapivts…:29443). KIS_BASE_URL로 바꾼다. 기본은 실전.
+const BASE = process.env.KIS_BASE_URL?.replace(/\/+$/, "") || "https://openapi.koreainvestment.com:9443";
 
 export interface KisCredentials {
   appKey: string;

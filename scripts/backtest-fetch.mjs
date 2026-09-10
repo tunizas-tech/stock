@@ -15,7 +15,8 @@ import pg from "pg";
 import { journalTickersToFetch } from "./lib/journal-tickers.mjs";
 import { todayKst } from "./lib/kst.mjs";
 
-const BASE = "https://openapi.koreainvestment.com:9443";
+// 모의투자 키는 도메인이 다르다(openapivts…:29443). KIS_BASE_URL로 바꾼다. 기본은 실전.
+const BASE = process.env.KIS_BASE_URL?.replace(/\/+$/, "") || "https://openapi.koreainvestment.com:9443";
 const OUT_DIR = "data/candles";
 const TOKEN_FILE = "data/.kis-token.json";
 const GAP_MS = 1500; // 0.35초는 간헐 실패한다. 1.5초가 안정적.
@@ -83,7 +84,8 @@ async function getToken() {
   if (existsSync(TOKEN_FILE)) {
     try {
       const c = JSON.parse(await readFile(TOKEN_FILE, "utf8"));
-      if (c.expiresAt > Date.now()) {
+      // 실전 토큰을 모의 서버에(또는 반대로) 재사용하면 안 되므로 발급처가 같을 때만 쓴다.
+      if (c.expiresAt > Date.now() && c.base === BASE) {
         console.log("  캐시된 토큰 재사용");
         return c.token;
       }
@@ -111,6 +113,7 @@ async function getToken() {
         JSON.stringify({
           token: body.access_token,
           expiresAt: Date.now() + (body.expires_in - 120) * 1000,
+          base: BASE,
         })
       );
       console.log("  새 토큰 발급");
