@@ -62,6 +62,7 @@ select * from journal order by date;
 | `APP_PASS` | **예** | 긴 비밀번호. 이게 없으면 관측소·매매일지가 인터넷에 열린다 |
 | `KIS_APP_KEY` | 예 | KIS 앱키 |
 | `KIS_APP_SECRET` | 예 | KIS 시크릿 |
+| `KIS_BASE_URL` | 선택 | 모의투자 키면 `https://openapivts.koreainvestment.com:29443`. 비우면 실전 서버 |
 | `DATABASE_URL` | **예** | Coolify Postgres 연결 문자열. 뉴스·매매일지·보유관심종목이 공용으로 쓴다. 없으면 매매일지·보유관심종목은 브라우저 localStorage로 떨어지고 `/news`는 안내 문구만 보인다 |
 | `AGENT_TOKEN` | 선택 | 있으면 `POST /api/journal/agent`·뉴스·관측소를 Bearer로 열어 Hermes가 쓴다. `openssl rand -hex 32` |
 | `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | 선택 | 뉴스용 |
@@ -73,6 +74,7 @@ KIS 앱키는 계좌에 묶여 있고 **시세 조회와 주문에 같은 키를
 
 - 파일로 두지 말고 Coolify 환경변수로만 넣는다
 - KIS 포털에서 **조회 전용 키를 따로 발급**할 수 있는지 확인하고, 되면 서버엔 그것만 넣는다
+- 더 안전한 길은 **모의투자 계좌의 키**를 쓰는 것이다(`KIS_BASE_URL` 설정). 실계좌와 완전히 분리된다. 단 모의투자는 일부 API(수급 등)를 제공하지 않을 수 있으니 `flow:fetch`가 도는지 먼저 확인한다
 - `APP_USER`/`APP_PASS` 없이 배포하지 않는다
 
 ## 4. 볼륨
