@@ -3,7 +3,7 @@
 //
 // 단위 함정: foreign/institution/individual은 백만원, *Qty는 주. 평단(원) = ΣV × 1e6 / ΣQ.
 // 이 한 줄이 틀리면 평단이 100만 배 틀리므로 첫 테스트가 실측 고정값이다.
-import type { FlowDay } from "./aggregate";
+import type { FlowDay, StockFlow } from "./aggregate";
 
 export type FlowActor = "foreign" | "institution" | "individual";
 export const AVG_WINDOWS = [5, 20, 60] as const;
@@ -71,5 +71,63 @@ export function supplyAvgPrice(days: FlowDay[], actor: FlowActor, window: AvgWin
     avgPrice,
     side: sumQty > 0 ? "buy" : "sell",
     returnPct: ((close - avgPrice) / avgPrice) * 100,
+  };
+}
+
+/** 창 안 종가의 최저·최고. 진짜 고저가가 아니라 종가 범위다 — UI 캡션에 명시할 것. */
+export function closeRange(days: FlowDay[], window: AvgWindow): { low: number; high: number } | null {
+  const win = sliceWindow(days, window);
+  if (win.length === 0) return null;
+  let low = Infinity;
+  let high = -Infinity;
+  for (const d of win) {
+    if (d.close < low) low = d.close;
+    if (d.close > high) high = d.close;
+  }
+  return { low, high };
+}
+
+/** 위치 바용. value가 [low, high] 어디쯤인지 0~100. 밖이면 끝에 붙이고, 범위가 0이면 가운데. */
+export function pricePositionPct(value: number, low: number, high: number): number {
+  if (high <= low) return 50;
+  const pct = ((value - low) / (high - low)) * 100;
+  return Math.max(0, Math.min(100, pct));
+}
+
+export const FLOW_ACTORS: FlowActor[] = ["foreign", "institution", "individual"];
+
+/** /api/flow 응답. 라우트는 파일만 읽고 이 함수 결과를 그대로 돌려준다. */
+export interface AvgPriceView {
+  ticker: string;
+  name: string;
+  sector: string;
+  window: AvgWindow;
+  /** 창 마지막 날짜. 데이터 없으면 null */
+  asOf: string | null;
+  close: number | null;
+  closeLow: number | null;
+  closeHigh: number | null;
+  tradingDays: number;
+  actors: Record<FlowActor, SupplyAvgPrice>;
+}
+
+export function buildAvgPriceView(stock: StockFlow, window: AvgWindow): AvgPriceView {
+  const win = sliceWindow(stock.days, window);
+  const last = win[win.length - 1];
+  const range = closeRange(stock.days, window);
+  const actors = Object.fromEntries(
+    FLOW_ACTORS.map((a) => [a, supplyAvgPrice(stock.days, a, window)]),
+  ) as Record<FlowActor, SupplyAvgPrice>;
+  return {
+    ticker: stock.ticker,
+    name: stock.name,
+    sector: stock.sector,
+    window,
+    asOf: last?.date ?? null,
+    close: last?.close ?? null,
+    closeLow: range?.low ?? null,
+    closeHigh: range?.high ?? null,
+    tradingDays: win.length,
+    actors,
   };
 }

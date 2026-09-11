@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FlowDay } from "./aggregate";
-import { supplyAvgPrice } from "./avg-price";
+import { buildAvgPriceView, closeRange, pricePositionPct, supplyAvgPrice } from "./avg-price";
 
 // 테스트용 하루치. 값은 백만원·주 — 실제 파일과 같은 단위.
 function day(
@@ -73,5 +73,44 @@ describe("supplyAvgPrice", () => {
     // 마지막 5일엔 첫날의 큰 값이 안 들어간다 → ΣQ=0
     expect(supplyAvgPrice(days, "foreign", 5)).toMatchObject({ reason: "zero-qty", tradingDays: 5 });
     expect(supplyAvgPrice(days.slice(0, 3), "foreign", 20).tradingDays).toBe(3);
+  });
+});
+
+describe("closeRange / pricePositionPct", () => {
+  it("창 안 종가의 최저·최고 — 빈 창이면 null", () => {
+    const days = twentyDays({ close: 346500 });
+    days[3] = { ...days[3], close: 329500 };
+    days[7] = { ...days[7], close: 398000 };
+    expect(closeRange(days, 20)).toEqual({ low: 329500, high: 398000 });
+    expect(closeRange([], 20)).toBeNull();
+  });
+
+  it("값의 위치를 0~100으로, 범위 밖은 클램프, low=high면 50", () => {
+    expect(pricePositionPct(329500, 329500, 398000)).toBe(0);
+    expect(pricePositionPct(398000, 329500, 398000)).toBe(100);
+    expect(pricePositionPct(363750, 329500, 398000)).toBe(50);
+    expect(pricePositionPct(100, 329500, 398000)).toBe(0);
+    expect(pricePositionPct(999999, 329500, 398000)).toBe(100);
+    expect(pricePositionPct(5, 5, 5)).toBe(50);
+  });
+});
+
+describe("buildAvgPriceView", () => {
+  it("종목 메타 + 창 종가 범위 + 3주체 평단을 한 응답으로 묶는다", () => {
+    const days = twentyDays({ close: 346500 }, { foreign: 50906, foreignQty: 127674, institution: -77980, institutionQty: -203351 });
+    const view = buildAvgPriceView({ ticker: "009540", name: "HD한국조선해양", sector: "조선", days }, 20);
+    expect(view).toMatchObject({
+      ticker: "009540", name: "HD한국조선해양", sector: "조선", window: 20,
+      asOf: "2026-08-30", close: 346500, closeLow: 346500, closeHigh: 346500, tradingDays: 20,
+    });
+    expect(view.actors.foreign.avgPrice).toBe(398719);
+    expect(view.actors.institution.side).toBe("sell");
+    expect(view.actors.individual.reason).toBe("zero-qty");
+  });
+
+  it("days가 비어 있으면 asOf·close·범위는 null이고 주체는 전부 zero-qty", () => {
+    const view = buildAvgPriceView({ ticker: "x", name: "x", sector: "x", days: [] }, 20);
+    expect(view).toMatchObject({ asOf: null, close: null, closeLow: null, closeHigh: null, tradingDays: 0 });
+    expect(view.actors.foreign.reason).toBe("zero-qty");
   });
 });
