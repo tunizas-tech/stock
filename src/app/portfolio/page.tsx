@@ -12,6 +12,7 @@ import { ImportCard } from "@/components/ImportCard";
 import { HoldingForm } from "@/components/HoldingForm";
 import { SectorFlowCompare } from "@/components/SectorFlowCompare";
 import { SectorWeightBar } from "@/components/SectorWeightBar";
+import { SupplyAvgPrice } from "@/components/SupplyAvgPrice";
 import { SectorSelect } from "@/components/SectorSelect";
 import { db } from "@/lib/data";
 import {
@@ -305,14 +306,23 @@ function HoldingsTable({
                   <td className="px-4 py-2" colSpan={2} />
                 </tr>
                 {g.holdings.map((h) => (
-                  <HoldingRow
-                    key={h.id}
-                    h={h}
-                    current={priceOf(h)}
-                    onOpenChart={onOpenChart}
-                    onSetSector={onSetSector}
-                    onRemove={onRemove}
-                  />
+                  <Fragment key={h.id}>
+                    <HoldingRow
+                      h={h}
+                      current={priceOf(h)}
+                      onOpenChart={onOpenChart}
+                      onSetSector={onSetSector}
+                      onRemove={onRemove}
+                    />
+                    {/* 수급 유니버스 안 KR 종목만 — 밖이면 데이터가 없어 줄을 만들지 않는다. */}
+                    {universeSector(h.market, h.ticker) && (
+                      <tr className="border-b border-line/60 last:border-0">
+                        <td className="whitespace-normal px-4 pb-3 pt-0 pl-12" colSpan={9}>
+                          <SupplyAvgPrice ticker={h.ticker} myAvgPrice={h.avgPrice} current={priceOf(h)} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </Fragment>
             ))}
